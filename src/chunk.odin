@@ -13,7 +13,7 @@ Chunk :: struct {
     constants: [dynamic]Value,
 }
 
-freeChunk :: proc(c: Chunk) {
+freeChunk :: proc(c: ^Chunk) {
     delete(c.code)
     delete(c.constants)
 }

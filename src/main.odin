@@ -7,7 +7,7 @@ main :: proc() {
 	defer(freeVM())
 
 	chunk: Chunk
-	defer(freeChunk(chunk))
+	defer(freeChunk(&chunk))
 
 	constant := addConstant(&chunk, 1.2)
 	writeChunk(&chunk, cast(u8)OpCode.OP_CONSTANT, 123)
