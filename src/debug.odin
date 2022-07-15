@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:strings"
 
 disassembleChunk :: proc(chunk: Chunk, name: string) {
     fmt.printf("== %s ==\n", name)
@@ -24,6 +25,16 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return simpleInstruction(.OP_RETURN, offset)
     case .OP_CONSTANT:
         return constantInstruction(.OP_CONSTANT, chunk, offset)
+    case .OP_ADD:
+        return simpleInstruction(.OP_ADD, offset)
+    case .OP_SUBTRACT:
+        return simpleInstruction(.OP_SUBTRACT, offset)
+    case .OP_MULTIPLY:
+        return simpleInstruction(.OP_MULTIPLY, offset)
+    case .OP_DIVIDE:
+        return simpleInstruction(.OP_DIVIDE, offset)
+    case .OP_NEGATE:
+        return simpleInstruction(.OP_NEGATE, offset)
     case: // default
         return offset + 1
     }
@@ -38,7 +49,9 @@ simpleInstruction :: proc(name: OpCode, offset: int) -> int {
 @private
 constantInstruction :: proc(name: OpCode, chunk: Chunk, offset: int) -> int {
     constant := chunk.code[offset + 1]
-    fmt.printf("%s    %v '", name, constant)
+    buf: [32]u8
+    name_str := fmt.bprintf(buf[:], "%v", name)
+    fmt.printf("%-16v %v '", name_str, constant)
     printValue(chunk.constants[constant])
     fmt.printf("'\n")
     return offset + 2

@@ -4,6 +4,11 @@ import "core:fmt"
 
 OpCode :: enum u8 {
     OP_CONSTANT,
+    OP_ADD,
+    OP_SUBTRACT,
+    OP_MULTIPLY,
+    OP_DIVIDE,
+    OP_NEGATE,
     OP_RETURN,
 }
 
@@ -18,9 +23,25 @@ freeChunk :: proc(c: ^Chunk) {
     delete(c.constants)
 }
 
-writeChunk :: proc(c: ^Chunk, byte: u8, line: int) {
+@private
+writeChunk_proc :: proc(c: ^Chunk, byte: u8, line: int) {
     append(&c.code, byte)
     append(&c.lines, line)
+} 
+
+@private
+writeChunk_OpCode :: proc(c: ^Chunk, op: OpCode, line: int) {
+    writeChunk_proc(c, cast(u8)op, line)
+}
+
+@private
+writeChunk_Int :: proc(c: ^Chunk, i: int, line: int) {
+    writeChunk_proc(c, cast(u8)i, line)
+}
+
+writeChunk :: proc {
+    writeChunk_OpCode,
+    writeChunk_Int,
 }
 
 addConstant :: proc(c: ^Chunk, value: Value) -> int {
