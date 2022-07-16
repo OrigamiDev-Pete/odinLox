@@ -6,7 +6,7 @@
         {
             "label": "build",
             "type": "shell",
-            "command": "odin build src -debug -out:odinLox.exe"
+            "command": "odin build src -debug -out:bin/lox.exe"
         }
     ]
 }

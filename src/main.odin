@@ -1,7 +1,10 @@
 package main
 
+import "core:bufio"
 import "core:fmt"
+import "core:io"
 import "core:mem"
+import "core:os"
 import "core:time"
 
 main :: proc() {
@@ -12,30 +15,42 @@ main :: proc() {
 	initVM()
 	defer(freeVM())
 
-	chunk: Chunk
-	defer(freeChunk(&chunk))
-
-	using OpCode {
-		constant := addConstant(&chunk, 1.2)
-		writeChunk(&chunk, OP_CONSTANT, 123)
-		writeChunk(&chunk, constant, 123)
-
-		constant = addConstant(&chunk, 3.4)
-		writeChunk(&chunk, OP_CONSTANT, 123)
-		writeChunk(&chunk, constant, 123)
-		
-		writeChunk(&chunk, OP_ADD, 123)
-
-		constant = addConstant(&chunk, 5.6)
-		writeChunk(&chunk, OP_CONSTANT, 123)
-		writeChunk(&chunk, constant, 123)
-
-		writeChunk(&chunk, OP_DIVIDE, 123)
-		writeChunk(&chunk, OP_NEGATE, 123)
-
-		writeChunk(&chunk, OP_RETURN, 123)
+	if (len(os.args) == 1) {
+		repl()
+	} else if (len(os.args) == 2) {
+		runFile(os.args[1])	
+	} else {
+		fmt.println("Usage: olox [path]")
+		os.exit(64)
 	}
+}
 
-	interpret(chunk)
+repl :: proc() {
+	line: [1024]u8
+	reader: bufio.Reader
+	bufio.reader_init_with_buf(&reader, io.to_reader(os.stream_from_handle(os.stdin)), line[:])
+	for {
+		fmt.printf("> ")
+
+		line, err := bufio.reader_read_slice(&reader, '\n')
+		if err != nil {
+			fmt.println(err)
+			break;
+		}
+		interpret(string(line[:]))
+	}
+}
+
+runFile :: proc(path: string) {
+	source, err := os.read_entire_file(path)
+	if (err) {
+		fmt.printf("Could not open file \"%v\".\n", path)
+		os.exit(74)
+	}
+	defer delete(source)
+	result := interpret(string(source[:]))
+
+	if result == InterpretResult.COMPILE_ERROR { os.exit(65) }
+	if result == InterpretResult.RUNTIME_ERROR { os.exit(70) }
 
 }

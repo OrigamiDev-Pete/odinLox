@@ -1,6 +1,8 @@
 @echo off
 
-odin build src -debug -out:odinLox.exe
+if not exist \bin mkdir \bin
+odin build src -debug -out:bin/lox.exe
 echo Debug build complete.
 
-devenv odinLox.exe
+echo Opening Visual Studio
+devenv bin/lox.exe %*

@@ -1,7 +1,6 @@
 package main
 
 import "core:fmt"
-import "core:strings"
 
 disassembleChunk :: proc(chunk: Chunk, name: string) {
     fmt.printf("== %s ==\n", name)
@@ -21,20 +20,20 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
 
     instruction := cast(OpCode)chunk.code[offset]
     switch instruction {
-    case .OP_RETURN:
-        return simpleInstruction(.OP_RETURN, offset)
-    case .OP_CONSTANT:
-        return constantInstruction(.OP_CONSTANT, chunk, offset)
-    case .OP_ADD:
-        return simpleInstruction(.OP_ADD, offset)
-    case .OP_SUBTRACT:
-        return simpleInstruction(.OP_SUBTRACT, offset)
-    case .OP_MULTIPLY:
-        return simpleInstruction(.OP_MULTIPLY, offset)
-    case .OP_DIVIDE:
-        return simpleInstruction(.OP_DIVIDE, offset)
-    case .OP_NEGATE:
-        return simpleInstruction(.OP_NEGATE, offset)
+    case .RETURN:
+        return simpleInstruction(.RETURN, offset)
+    case .CONSTANT:
+        return constantInstruction(.CONSTANT, chunk, offset)
+    case .ADD:
+        return simpleInstruction(.ADD, offset)
+    case .SUBTRACT:
+        return simpleInstruction(.SUBTRACT, offset)
+    case .MULTIPLY:
+        return simpleInstruction(.MULTIPLY, offset)
+    case .DIVIDE:
+        return simpleInstruction(.DIVIDE, offset)
+    case .NEGATE:
+        return simpleInstruction(.NEGATE, offset)
     case: // default
         return offset + 1
     }

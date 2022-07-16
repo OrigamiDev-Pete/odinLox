@@ -14,9 +14,9 @@ VM :: struct {
 }
 
 InterpretResult :: enum {
-    INTERPRET_OK,
-    INTERPRET_COMPILE_ERROR,
-    INTERPRET_RUNTIME_ERROR,
+    OK,
+    COMPILE_ERROR,
+    RUNTIME_ERROR,
 }
 
 vm: VM
@@ -29,10 +29,9 @@ freeVM :: proc() {
 
 }
 
-interpret :: proc(chunk: Chunk) -> InterpretResult {
-    vm.chunk = chunk
-    vm.ip = vm.chunk.code[:]
-    return run()
+interpret :: proc(source: string) -> InterpretResult {
+    compile(source)
+    return .OK
 }
 
 run :: proc() -> InterpretResult {
@@ -50,35 +49,35 @@ run :: proc() -> InterpretResult {
 
         instruction := cast(OpCode) readByte()
         switch instruction {
-            case .OP_RETURN:
+            case .RETURN:
                 printValue(pop())
                 fmt.println()
-                return .INTERPRET_OK
+                return .OK
 
-            case .OP_ADD:
+            case .ADD:
                 b := pop()
                 a := pop()
                 push(a + b)
 
-            case .OP_SUBTRACT:
+            case .SUBTRACT:
                 b := pop()
                 a := pop()
                 push(a - b)
 
-            case .OP_MULTIPLY:
+            case .MULTIPLY:
                 b := pop()
                 a := pop()
                 push(a * b)
 
-            case .OP_DIVIDE:
+            case .DIVIDE:
                 b := pop()
                 a := pop()
                 push(a / b)
 
-            case .OP_NEGATE:
+            case .NEGATE:
                 vm.stack[vm.stackIndex-1] = -vm.stack[vm.stackIndex-1]
 
-            case .OP_CONSTANT:
+            case .CONSTANT:
                 constant := readConstant()
                 push(constant)
         }
