@@ -1,7 +1,7 @@
 package main
 
 import "core:fmt"
-
+import "core:log"
 
 DEBUG_STACK_TRACE :: false
 STACK_MAX :: 256
@@ -30,18 +30,27 @@ freeVM :: proc() {
 }
 
 interpret :: proc(source: string) -> InterpretResult {
-    compile(source)
-    return .OK
+	chunk: Chunk
+	defer freeChunk(&chunk)
+
+	if !compile(source, &chunk) {
+		return .COMPILE_ERROR
+	}
+
+	vm.chunk = chunk
+	vm.ip = vm.chunk.code[:]
+
+	return run()
 }
 
 run :: proc() -> InterpretResult {
     for {
         when DEBUG_STACK_TRACE {
-            fmt.printf("          ")
+            log.debugf("          ")
             for i in 0..<vm.stackIndex {
-                fmt.printf("[ ")
+                log.debugf("[ ")
                 printValue(vm.stack[i])
-                fmt.printf(" ]")
+                log.debugf(" ]")
             }
             fmt.println()
             disassembleInstruction(vm.chunk,  len(vm.chunk.code) - len(vm.ip))

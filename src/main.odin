@@ -3,11 +3,14 @@ package main
 import "core:bufio"
 import "core:fmt"
 import "core:io"
+import "core:log"
 import "core:mem"
 import "core:os"
 import "core:time"
 
 main :: proc() {
+	context.logger = log.create_console_logger()
+
 	tracking_allocator: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&tracking_allocator, context.allocator)
 	context.allocator = mem.tracking_allocator(&tracking_allocator)

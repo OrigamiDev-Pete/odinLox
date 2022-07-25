@@ -42,14 +42,9 @@ Scanner :: struct {
     line: int,
 }
 
-TokenValue :: union {
-    []rune,
-    string,
-}
-
 Token :: struct {
     type: TokenType,
-    value: TokenValue,
+    value: string,
     line: int,
 }
 
@@ -65,8 +60,6 @@ initScanner :: proc(source: string) {
 scanToken :: proc() -> Token {
     skipWhitespace()
     scanner.start = scanner.current
-    // fmt.println(scanner)
-    // fmt.println(len(scanner.buf))
     if isAtEnd() {
         return makeToken(.EOF)
     }
@@ -109,7 +102,7 @@ makeToken :: proc(type: TokenType) -> (token: Token) {
 
 errorToken :: proc(error_message: string) -> (token: Token) {
     token.type = .ERROR
-    token.value = utf8.string_to_runes(error_message)
+    token.value = error_message
     token.line = scanner.line
     return
 }
@@ -220,6 +213,7 @@ stringLiteral :: proc() -> Token {
     return makeToken(.STRING)
 }
 
+@(private = "file")
 advance :: proc() -> rune {
     scanner.current += 1
     return utf8string.at(&scanner.buf, scanner.current-1)
