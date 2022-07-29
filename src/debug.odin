@@ -24,6 +24,18 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return simpleInstruction(.RETURN, offset)
     case .CONSTANT:
         return constantInstruction(.CONSTANT, chunk, offset)
+    case .NIL:
+        return simpleInstruction(.NIL, offset)
+    case .TRUE:
+        return simpleInstruction(.TRUE, offset)
+    case .FALSE:
+        return simpleInstruction(.FALSE, offset)
+    case .EQUAL:
+        return simpleInstruction(.EQUAL, offset)
+    case .GREATER:
+        return simpleInstruction(.GREATER, offset)
+    case .LESS:
+        return simpleInstruction(.LESS, offset)
     case .ADD:
         return simpleInstruction(.ADD, offset)
     case .SUBTRACT:
@@ -32,6 +44,8 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return simpleInstruction(.MULTIPLY, offset)
     case .DIVIDE:
         return simpleInstruction(.DIVIDE, offset)
+    case .NOT:
+        return simpleInstruction(.NOT, offset)
     case .NEGATE:
         return simpleInstruction(.NEGATE, offset)
     case: // default

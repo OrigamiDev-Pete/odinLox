@@ -79,8 +79,8 @@ scanToken :: proc() -> Token {
         case '+': return makeToken(.PLUS)
         case '/': return makeToken(.SLASH)
         case '*': return makeToken(.STAR)
-        case '!': return makeToken(.EQUAL_EQUAL if match('=') else .BANG)
-        case '=': return makeToken(.BANG_EQUAL if match('=') else .EQUAL)
+        case '!': return makeToken(.BANG_EQUAL if match('=') else .BANG)
+        case '=': return makeToken(.EQUAL_EQUAL if match('=') else .EQUAL)
         case '<': return makeToken(.LESS_EQUAL if match('=') else .LESS)
         case '>': return makeToken(.GREATER_EQUAL if match('=') else .GREATER)
         case '"': return stringLiteral()
@@ -219,6 +219,7 @@ advance :: proc() -> rune {
     return utf8string.at(&scanner.buf, scanner.current-1)
 }
 
+@(private = "file")
 peek :: proc() -> rune {
     return utf8string.at(&scanner.buf, scanner.current)
 }
