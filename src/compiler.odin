@@ -176,6 +176,10 @@ number :: proc() {
     emitConstant(Value{.NUMBER, value})
 }
 
+lstring :: proc() {
+    emitConstant(Value{ .OBJ, cast(^Obj) copyString(parser.previous.value) })
+}
+
 unary :: proc() {
     operatorType := parser.previous.type
 
@@ -210,7 +214,7 @@ rules: []ParseRule = {
     TokenType.LESS          = ParseRule{ nil,      binary, .COMPARISON },
     TokenType.LESS_EQUAL    = ParseRule{ nil,      binary, .COMPARISON },
     TokenType.IDENTIFIER    = ParseRule{ nil,      nil,    .NONE },
-    TokenType.STRING        = ParseRule{ nil,      nil,    .NONE },
+    TokenType.STRING        = ParseRule{ lstring,   nil,    .NONE },
     TokenType.NUMBER        = ParseRule{ number,   nil,    .NONE },
     TokenType.AND           = ParseRule{ nil,      nil,    .NONE },
     TokenType.CLASS         = ParseRule{ nil,      nil,    .NONE },

@@ -11,6 +11,7 @@ VM :: struct {
     ip: []u8,
     stack: [STACK_MAX]Value,
     stackIndex: i32,
+    objects: ^Obj,
 }
 
 InterpretResult :: enum {
@@ -26,7 +27,7 @@ initVM :: proc() {
 }
 
 freeVM :: proc() {
-
+    freeObjects()
 }
 
 interpret :: proc(source: string) -> InterpretResult {
@@ -90,11 +91,21 @@ run :: proc() -> InterpretResult {
 
 
             case .ADD:
-                checkNumbers() or_return
-                b := pop()
-                a := pop()
-                a.variant = a.variant.(f64) + b.variant.(f64)
-                push(a)
+                v1, ok1 := peek(0).variant.(^Obj)
+                v2, ok2 := peek(1).variant.(^Obj)
+                if ok1 && ok2 {
+                    if v1.type == .STRING && v2.type == .STRING {
+                        concatenate()
+                    }
+                } else if peek(0).type == .NUMBER && peek(0).type == .NUMBER {
+                    b := pop()
+                    a := pop()
+                    a.variant = a.variant.(f64) + b.variant.(f64)
+                    push(a)
+                } else {
+                    runtimeError("Operands must be two numbers or two strings.")
+                    return .RUNTIME_ERROR
+                }
 
             case .SUBTRACT:
                 checkNumbers() or_return
@@ -156,6 +167,20 @@ isFalsey :: proc(value: Value) -> bool {
     return value.type == .NIL || (value.type == .BOOL && !value.variant.(bool))
 }
 
+concatenate :: proc() {
+    b := cast(^ObjString) pop().variant.(^Obj)
+    a := cast(^ObjString) pop().variant.(^Obj)
+
+    length := len(a.str) + len(b.str)
+    chars := make([]byte, length)
+    i := 0
+    i =+ copy(chars[i:], a.str)
+    copy(chars[i:], b.str)
+
+    result := takeString(string(chars))
+    push(Value{.OBJ, cast(^Obj)result})
+}
+
 @private
 readByte :: proc() -> (b: u8) {
     b = vm.ip[0]
@@ -181,4 +206,13 @@ runtimeError :: proc(format: string, args: ..any) {
     line := vm.chunk.lines[instruction_index]
     log.errorf("[line %v] in script\n", line)
     resetStack()
+}
+
+freeObjects :: proc() {
+    object := vm.objects
+    for object != nil {
+        next := object.next
+        freeObject(object)
+        object = next
+    }
 }
