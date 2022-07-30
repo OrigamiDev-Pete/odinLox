@@ -11,6 +11,7 @@ VM :: struct {
     ip: []u8,
     stack: [STACK_MAX]Value,
     stackIndex: i32,
+    strings: Table,
     objects: ^Obj,
 }
 

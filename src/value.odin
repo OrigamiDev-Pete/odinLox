@@ -32,10 +32,7 @@ valuesEqual :: proc(a, b: Value) -> bool {
         case .BOOL:   return a.variant.(bool) == b.variant.(bool)
         case .NIL:    return true
         case .NUMBER: return a.variant.(f64) == b.variant.(f64)
-        case .OBJ:
-            aString := cast(^ObjString) a.variant.(^Obj)
-            bString := cast(^ObjString) b.variant.(^Obj)
-            return aString.str == bString.str
+        case .OBJ:    return a.variant == b.variant // Valid because of string interning
         case: return false // unreachable
     }
 }
