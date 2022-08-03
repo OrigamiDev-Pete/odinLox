@@ -3,6 +3,7 @@ package main
 
 import "core:log"
 import "core:strconv"
+import "core:strings"
 
 DEBUG_PRINT_CODE :: true
 
@@ -27,7 +28,7 @@ Precedence :: enum {
     PRIMARY,
 }
 
-ParseFn :: #type proc()
+ParseFn :: #type proc(canAssign: bool)
 
 ParseRule :: struct {
     prefix: ParseFn,
@@ -35,7 +36,21 @@ ParseRule :: struct {
     precedence: Precedence,
 }
 
+U8_MAX :: cast(int)max(u8)
+
+Local :: struct {
+    name: Token,
+    depth: int,
+}
+
+Compiler :: struct {
+    locals: [U8_MAX + 1]Local,
+    localCount: int,
+    scopeDepth: int,
+}
+
 parser: Parser
+current: ^Compiler = nil
 compilingChunk: ^Chunk
 
 currentChunk :: proc() -> ^Chunk {
@@ -45,10 +60,14 @@ currentChunk :: proc() -> ^Chunk {
 
 compile :: proc(source: string, chunk: ^Chunk) -> bool {
     initScanner(source)
+    compiler: Compiler
+    initCompiler(&compiler)
     compilingChunk = chunk
 
 	advance()
-	expression()
+	for (!match(.EOF)) {
+        declaration()
+    }
 	consume(.EOF, "Expect end of expression.")
     endCompiler()
     return !parser.hadError
@@ -74,6 +93,17 @@ consume :: proc(type: TokenType, message: string) {
     errorAtCurrent(message)
 }
 
+check :: proc(type: TokenType) -> bool {
+    return parser.current.type == type
+}
+
+@(private = "file")
+match :: proc(type: TokenType) -> bool {
+    if !check(type) { return false }
+    advance()
+    return true
+} 
+
 // Emitters
 
 emitByte_u8 :: proc(byte: u8) {
@@ -89,7 +119,7 @@ emitByte :: proc {
     emitByte_OpCode,
 }
 
-emitBytes_u8 :: proc(byte1, byte2: u8) {
+emitBytes_u8 :: proc(byte1: OpCode, byte2: u8) {
     emitByte(byte1)
     emitByte(byte2)
 }
@@ -109,12 +139,14 @@ emitReturn :: proc() {
 }
 
 emitConstant :: proc(value: Value) {
-    emitBytes(cast(u8)OpCode.CONSTANT, makeConstant(value))
+    emitBytes(OpCode.CONSTANT, makeConstant(value))
 }
 
 //
 
-U8_MAX :: cast(int)max(u8)
+initCompiler :: proc(compiler: ^Compiler) {
+    current = compiler
+}
 
 makeConstant :: proc(value: Value) -> u8 {
     constant := addConstant(currentChunk(), value)
@@ -135,7 +167,20 @@ endCompiler :: proc() {
     }
 }
 
-binary :: proc() {
+beginScope :: proc() {
+    current.scopeDepth += 1
+}
+
+endScope :: proc() {
+    current.scopeDepth -= 1
+
+    for current.localCount > 0 && current.locals[current.localCount - 1].depth > current.scopeDepth {
+        emitByte(OpCode.POP)
+        current.localCount -= 1
+    }
+}
+
+binary :: proc(canAssign: bool) {
     operatoryType := parser.previous.type
     rule := getRule(operatoryType)
     parsePrecedence(cast(Precedence)(int(rule.precedence) + 1))
@@ -154,7 +199,7 @@ binary :: proc() {
     }
 }
 
-literal :: proc() {
+literal :: proc(canAssign: bool) {
     #partial switch parser.previous.type {
         case .FALSE: emitByte(OpCode.FALSE)
         case .NIL:   emitByte(OpCode.NIL)
@@ -166,21 +211,116 @@ expression :: proc() {
     parsePrecedence(.ASSIGNMENT)
 }
 
-grouping :: proc() {
+block :: proc() {
+    for !check(.RIGHT_BRACE) && !check(.EOF) {
+        declaration()
+    }
+
+    consume(.RIGHT_BRACE, "Expect '}' after block.")
+}
+
+varDeclaration :: proc() {
+    global := parseVariable("Expect variable name.")
+
+    if match(.EQUAL) {
+        expression()
+    } else {
+        emitByte(OpCode.NIL)
+    }
+    consume(.SEMICOLON, "Expect ';' after variable declaration.")
+
+    defineVariable(global)
+}
+
+expressionStatement :: proc() {
+    expression()
+    consume(.SEMICOLON, "Expect ';' after expression.")
+    emitByte(OpCode.POP)
+}
+
+printStatement :: proc() {
+    expression()
+    consume(.SEMICOLON, "Expect ';' after value.")
+    emitByte(OpCode.PRINT)
+}
+
+syncronize :: proc() {
+    parser.panicMode = false
+
+    for parser.current.type != .EOF {
+        if parser.previous.type == .SEMICOLON { return }
+        #partial switch parser.current.type {
+            case .CLASS, .FUN, .VAR, .FOR, .IF, .WHILE, .PRINT, .RETURN: return
+            case: // Do nothing
+        }
+
+        advance()
+    }
+}
+
+declaration :: proc() {
+    if match(.VAR) {
+        varDeclaration()
+    } else {
+        statement()
+    }
+
+    if parser.panicMode { syncronize() }
+}
+
+statement :: proc() {
+    if match(.PRINT) {
+        printStatement()
+    } else if match(.LEFT_BRACE) {
+        beginScope()
+        block()
+        endScope()
+    } else {
+        expressionStatement()
+    }
+}
+
+grouping :: proc(canAssign: bool) {
     expression()
     consume(.RIGHT_PAREN, "Expect ')' after expression.")
 }
 
-number :: proc() {
+number :: proc(canAssign: bool) {
     value := strconv.atof(parser.previous.value)
     emitConstant(Value{.NUMBER, value})
 }
 
-lstring :: proc() {
-    emitConstant(Value{ .OBJ, cast(^Obj) copyString(parser.previous.value) })
+lstring :: proc(canAssign: bool) {
+    str := parser.previous.value[1:len(parser.previous.value)-1] // remove the "" from the string literal
+    emitConstant(Value{ .OBJ, cast(^Obj) copyString(str) })
 }
 
-unary :: proc() {
+namedVariable :: proc(name: ^Token, canAssign: bool) {
+    getOp, setOp: OpCode
+    arg := resolveLocal(current, name)
+    if arg != -1 {
+        getOp = .GET_LOCAL
+        setOp = .SET_LOCAL
+    } else {
+        arg = int(identifierConstant(name))
+        getOp = .GET_GLOBAL
+        setOp = .SET_GLOBAL
+    }
+
+    if canAssign && match(.EQUAL) {
+        expression()
+        emitBytes(setOp, u8(arg))
+    } else {
+        emitBytes(getOp, u8(arg))
+    }
+
+}
+
+variable :: proc(canAssign: bool) {
+    namedVariable(&parser.previous, canAssign)
+}
+
+unary :: proc(canAssign: bool) {
     operatorType := parser.previous.type
 
     // Compile the operand
@@ -213,8 +353,8 @@ rules: []ParseRule = {
     TokenType.GREATER_EQUAL = ParseRule{ nil,      binary, .COMPARISON },
     TokenType.LESS          = ParseRule{ nil,      binary, .COMPARISON },
     TokenType.LESS_EQUAL    = ParseRule{ nil,      binary, .COMPARISON },
-    TokenType.IDENTIFIER    = ParseRule{ nil,      nil,    .NONE },
-    TokenType.STRING        = ParseRule{ lstring,   nil,    .NONE },
+    TokenType.IDENTIFIER    = ParseRule{ variable, nil,    .NONE },
+    TokenType.STRING        = ParseRule{ lstring,  nil,    .NONE },
     TokenType.NUMBER        = ParseRule{ number,   nil,    .NONE },
     TokenType.AND           = ParseRule{ nil,      nil,    .NONE },
     TokenType.CLASS         = ParseRule{ nil,      nil,    .NONE },
@@ -244,13 +384,90 @@ parsePrecedence :: proc(precedence: Precedence) {
         return
     }
 
-    prefixRule()
+    canAssign := precedence <= .ASSIGNMENT
+    prefixRule(canAssign)
 
     for precedence <= getRule(parser.current.type).precedence {
         advance()
         infixRule := getRule(parser.previous.type).infix
-        infixRule()
+        infixRule(canAssign)
     }
+
+    if canAssign && match(.EQUAL) {
+        error("Invalid assignment target.")
+    }
+}
+
+identifierConstant :: proc(name: ^Token) -> u8 {
+    return makeConstant(Value{.OBJ, cast(^Obj) copyString(name.value)})
+}
+
+identifiersEqual :: proc(a, b: ^Token) -> bool {
+    if len(a.value) != len(b.value) { return false }
+    return strings.compare(a.value, b.value) == 0
+}
+
+resolveLocal :: proc(compiler: ^Compiler, name: ^Token) -> int {
+    for i := compiler.localCount-1; i >= 0; i -= 1 {
+        local := &compiler.locals[i]
+        if identifiersEqual(name, &local.name) {
+            if local.depth == -1 {
+                error("Can't read local variable in its own initializer.")
+            }
+            return i
+        }
+    }
+    return -1
+}
+
+addLocal :: proc(name: Token) {
+    if current.localCount == U8_MAX + 1 {
+        error("Too many local variables in function.")
+        return
+    }
+
+    local := &current.locals[current.localCount]
+    current.localCount += 1
+    local.name = name
+    local.depth = -1
+}
+
+declareVariable :: proc() {
+    if current.scopeDepth == 0 { return }
+
+    name := &parser.previous
+    for i := current.localCount-1; i >= 0; i -=1 {
+        local := &current.locals[i]
+        if local.depth != -1 && local.depth < current.scopeDepth {
+            break
+        }
+
+        if identifiersEqual(name, &local.name) {
+            error("Already a variable with this name in this scope.")
+        }
+    }
+    addLocal(name^)
+}
+
+parseVariable :: proc(errorMessage: string) -> u8 {
+    consume(.IDENTIFIER, errorMessage)
+
+    declareVariable()
+    if current.scopeDepth > 0 { return 0 }
+    return identifierConstant(&parser.previous)
+}
+
+markInitialized :: proc() {
+    current.locals[current.localCount-1].depth = current.scopeDepth
+}
+
+defineVariable :: proc(global: u8) {
+    if current.scopeDepth > 0 {
+        markInitialized()
+        return
+    }
+
+    emitBytes(OpCode.DEFINE_GLOBAL, global)
 }
 
 getRule :: proc(type: TokenType) -> ParseRule {

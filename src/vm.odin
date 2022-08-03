@@ -12,6 +12,7 @@ VM :: struct {
     stack: [STACK_MAX]Value,
     stackIndex: i32,
     strings: Table,
+    globals: Table,
     objects: ^Obj,
 }
 
@@ -28,6 +29,8 @@ initVM :: proc() {
 }
 
 freeVM :: proc() {
+    freeTable(&vm.strings)
+    freeTable(&vm.globals)
     freeObjects()
 }
 
@@ -60,11 +63,6 @@ run :: proc() -> InterpretResult {
 
         instruction := cast(OpCode) readByte()
         switch instruction {
-            case .RETURN:
-                printValue(pop())
-                fmt.println()
-                return .OK
-
             case .CONSTANT:
                 constant := readConstant()
                 push(constant)
@@ -72,6 +70,38 @@ run :: proc() -> InterpretResult {
             case .NIL: push(Value{.NIL, nil})
             case .TRUE: push(Value{.BOOL, true})
             case .FALSE: push(Value{.BOOL, false})
+            case .POP: pop()
+
+            case .GET_LOCAL:
+                slot := readByte()
+                push(vm.stack[slot])
+
+            case .SET_LOCAL:
+                slot := readByte()
+                vm.stack[slot] = peek(0)
+
+            case .GET_GLOBAL:
+                name := readString()
+                value: Value
+                ok: bool
+                if value, ok = tableGet(&vm.globals, name); !ok {
+                    runtimeError("Undefined variable '%s'.", name.str)
+                    return .RUNTIME_ERROR
+                }
+                push(value)
+
+            case .DEFINE_GLOBAL:
+                name := readString()
+                tableSet(&vm.globals, name, peek(0))
+                pop()
+
+            case .SET_GLOBAL:
+                name := readString()
+                if tableSet(&vm.globals, name, peek(0)) {
+                    tableDelete(&vm.globals, name)
+                    runtimeError("Undefined variable '%s'.", name.str)
+                    return .RUNTIME_ERROR
+                }
 
             case .EQUAL:
                 b := pop()
@@ -138,6 +168,14 @@ run :: proc() -> InterpretResult {
                     return .RUNTIME_ERROR
                 }
                 vm.stack[vm.stackIndex-1].variant = -vm.stack[vm.stackIndex-1].variant.(f64)
+
+            case .PRINT:
+                printValue(pop())
+                fmt.println()
+
+            case .RETURN:
+                // Exit interpreter.
+                return .OK
         }
     }
 }
@@ -192,6 +230,10 @@ readByte :: proc() -> (b: u8) {
 @private
 readConstant :: proc() -> Value {
     return vm.chunk.constants[readByte()]
+}
+
+readString :: proc() -> ^ObjString {
+    return cast(^ObjString) readConstant().variant.(^Obj)
 }
 
 @private

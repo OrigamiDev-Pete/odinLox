@@ -229,6 +229,7 @@ peekNext :: proc() -> (rune, io.Error) {
     return utf8string.at(&scanner.buf, scanner.current+1), nil
 }
 
+@(private = "file")
 match :: proc(expected: rune) -> bool {
     if isAtEnd() { return false }
     if utf8string.at(&scanner.buf, scanner.current) != expected { return false }

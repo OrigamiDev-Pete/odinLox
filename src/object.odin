@@ -24,13 +24,13 @@ isObjType :: proc(value: Value, type: ObjType) -> bool {
 
 printObject :: proc(object: ^Obj) {
     switch object.type {
-        case .STRING: fmt.printf("\"%v\"", (cast(^ObjString) object).str)
+        case .STRING: fmt.printf("%v", (cast(^ObjString) object).str)
         case: fmt.print(object)
     }
 }
 
 copyString :: proc(str: string) -> ^ObjString {
-    s := strings.clone(str[1:len(str)-1])
+    s := strings.clone(str)
     hash := hashString(s)
 
     interned := tableFindString(&vm.strings, s, hash)

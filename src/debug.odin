@@ -5,7 +5,8 @@ import "core:fmt"
 disassembleChunk :: proc(chunk: Chunk, name: string) {
     fmt.printf("== %s ==\n", name)
 
-    for offset := 0; offset < len(chunk.code); {
+    offset := 0; 
+    for offset < len(chunk.code) {
         offset = disassembleInstruction(chunk, offset)
     }
 }
@@ -20,8 +21,6 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
 
     instruction := cast(OpCode)chunk.code[offset]
     switch instruction {
-    case .RETURN:
-        return simpleInstruction(.RETURN, offset)
     case .CONSTANT:
         return constantInstruction(.CONSTANT, chunk, offset)
     case .NIL:
@@ -30,6 +29,18 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return simpleInstruction(.TRUE, offset)
     case .FALSE:
         return simpleInstruction(.FALSE, offset)
+    case .POP:
+        return simpleInstruction(.POP, offset)
+    case .GET_LOCAL:
+        return byteInstruction(.GET_LOCAL, chunk, offset)
+    case .SET_LOCAL:
+        return byteInstruction(.SET_LOCAL, chunk, offset)
+    case .GET_GLOBAL:
+        return constantInstruction(.GET_GLOBAL, chunk, offset)
+    case .DEFINE_GLOBAL:
+        return constantInstruction(.DEFINE_GLOBAL, chunk, offset)
+    case .SET_GLOBAL:
+        return constantInstruction(.SET_GLOBAL, chunk, offset)
     case .EQUAL:
         return simpleInstruction(.EQUAL, offset)
     case .GREATER:
@@ -48,18 +59,30 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return simpleInstruction(.NOT, offset)
     case .NEGATE:
         return simpleInstruction(.NEGATE, offset)
+    case .PRINT:
+        return simpleInstruction(.PRINT, offset)
+    case .RETURN:
+        return simpleInstruction(.RETURN, offset)
     case: // default
         return offset + 1
     }
 }
 
-@private
+@(private = "file")
 simpleInstruction :: proc(name: OpCode, offset: int) -> int {
     fmt.println(name)
     return offset + 1
 }
 
-@private
+byteInstruction :: proc(name: OpCode, chunk: Chunk, offset: int) -> int {
+    slot := chunk.code[offset + 1]
+    buf: [32]u8
+    name_str := fmt.bprintf(buf[:], "%v", name)
+    fmt.printf("%-16v %v '", name_str, slot)
+    return offset + 2
+}
+
+@(private = "file")
 constantInstruction :: proc(name: OpCode, chunk: Chunk, offset: int) -> int {
     constant := chunk.code[offset + 1]
     buf: [32]u8
