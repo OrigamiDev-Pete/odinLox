@@ -61,6 +61,12 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return simpleInstruction(.NEGATE, offset)
     case .PRINT:
         return simpleInstruction(.PRINT, offset)
+    case .JUMP:
+        return jumpInstruction(.JUMP, 1, chunk, offset)
+    case .JUMP_IF_FALSE:
+        return jumpInstruction(.JUMP_IF_FALSE, 1, chunk, offset)
+    case .LOOP:
+        return jumpInstruction(.LOOP, -1, chunk, offset)
     case .RETURN:
         return simpleInstruction(.RETURN, offset)
     case: // default
@@ -74,12 +80,21 @@ simpleInstruction :: proc(name: OpCode, offset: int) -> int {
     return offset + 1
 }
 
+@(private = "file")
 byteInstruction :: proc(name: OpCode, chunk: Chunk, offset: int) -> int {
     slot := chunk.code[offset + 1]
     buf: [32]u8
     name_str := fmt.bprintf(buf[:], "%v", name)
     fmt.printf("%-16v %v '", name_str, slot)
     return offset + 2
+}
+
+@(private = "file")
+jumpInstruction :: proc(name: OpCode, sign: int, chunk: Chunk, offset: int) -> int {
+    jump := u16(chunk.code[offset + 1] << 8)
+    jump |= u16(chunk.code[offset + 2])
+    fmt.printf("%-16v %4d -> %d\n", name, offset, offset + 3 + sign * int(jump))
+    return offset + 3
 }
 
 @(private = "file")

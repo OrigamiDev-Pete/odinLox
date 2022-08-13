@@ -3,12 +3,12 @@ package main
 import "core:fmt"
 import "core:log"
 
-DEBUG_STACK_TRACE :: true
+DEBUG_STACK_TRACE :: false
 STACK_MAX :: 256
 
 VM :: struct {
     chunk: Chunk,
-    ip: []u8,
+    ip: int,
     stack: [STACK_MAX]Value,
     stackIndex: i32,
     strings: Table,
@@ -43,7 +43,8 @@ interpret :: proc(source: string) -> InterpretResult {
 	}
 
 	vm.chunk = chunk
-	vm.ip = vm.chunk.code[:]
+	// vm.ip = vm.chunk.code[:]
+    vm.ip = 0;
 
 	return run()
 }
@@ -58,7 +59,7 @@ run :: proc() -> InterpretResult {
                 fmt.printf(" ]")
             }
             fmt.println()
-            disassembleInstruction(vm.chunk,  len(vm.chunk.code) - len(vm.ip))
+            disassembleInstruction(vm.chunk, vm.ip)
         }
 
         instruction := cast(OpCode) readByte()
@@ -173,6 +174,20 @@ run :: proc() -> InterpretResult {
                 printValue(pop())
                 fmt.println()
 
+            case .JUMP:
+                offset := readShort()
+                vm.ip += int(offset)
+
+            case .JUMP_IF_FALSE:
+                offset := readShort()
+                if isFalsey(peek(0)) {
+                    vm.ip += int(offset)
+                }
+
+            case .LOOP: 
+                offset := readShort()
+                vm.ip -= int(offset)
+
             case .RETURN:
                 // Exit interpreter.
                 return .OK
@@ -220,14 +235,22 @@ concatenate :: proc() {
     push(Value{.OBJ, cast(^Obj)result})
 }
 
-@private
 readByte :: proc() -> (b: u8) {
-    b = vm.ip[0]
-    vm.ip = vm.ip[1:]
+    // b = vm.ip[0]
+    b = currentChunk().code[vm.ip]
+    // vm.ip = vm.ip[1:]
+    vm.ip += 1
     return
 }
 
-@private
+readShort :: proc() -> (s: u16) {
+    vm.ip += 2
+    // s = u16((vm.ip[0] << 8) | vm.ip[1])
+    s = u16((currentChunk().code[vm.ip - 2] << 8) | currentChunk().code[vm.ip - 1])
+    // vm.ip = vm.ip[2:]
+    return
+}
+
 readConstant :: proc() -> Value {
     return vm.chunk.constants[readByte()]
 }
@@ -236,7 +259,6 @@ readString :: proc() -> ^ObjString {
     return cast(^ObjString) readConstant().variant.(^Obj)
 }
 
-@private
 resetStack :: proc() {
     vm.stackIndex = 0
 }
@@ -245,7 +267,8 @@ runtimeError :: proc(format: string, args: ..any) {
     log.errorf(format, ..args)
     // log.error()
 
-    instruction_index := len(vm.chunk.code) - len(vm.ip) - 1
+    // instruction_index := len(vm.chunk.code) - len(vm.ip) - 1
+    instruction_index := len(vm.chunk.code) - vm.ip - 1
     line := vm.chunk.lines[instruction_index]
     log.errorf("[line %v] in script\n", line)
     resetStack()

@@ -23,6 +23,9 @@ OpCode :: enum u8 {
     NOT,
     NEGATE,
     PRINT,
+    JUMP,
+    JUMP_IF_FALSE,
+    LOOP,
     RETURN,
 }
 

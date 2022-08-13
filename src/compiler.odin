@@ -5,7 +5,7 @@ import "core:log"
 import "core:strconv"
 import "core:strings"
 
-DEBUG_PRINT_CODE :: true
+DEBUG_PRINT_CODE :: false
 
 Parser :: struct {
 	current: Token,
@@ -134,12 +134,43 @@ emitBytes :: proc {
     emitBytes_OpCode,
 }
 
+emitLoop :: proc(loopStart: int) {
+    emitByte(OpCode.LOOP)
+
+    offset := len(currentChunk().code) - loopStart + 2
+    if offset > int(max(u16)) {
+        error("Loop body too large.")
+    }
+
+    emitByte(u8((offset >> 8) & 0xff))
+    emitByte(u8(offset & 0xff))
+}
+
+emitJump :: proc(instruction: OpCode) -> int {
+    emitByte(instruction)
+    emitByte(0xff)
+    emitByte(0xff)
+    return len(currentChunk().code) - 2
+}
+
 emitReturn :: proc() {
     writeChunk(currentChunk(), OpCode.RETURN, parser.previous.line)
 }
 
 emitConstant :: proc(value: Value) {
     emitBytes(OpCode.CONSTANT, makeConstant(value))
+}
+
+patchJump :: proc(offset: int) {
+    // -2 to adjust for the bytecode for the jump offset itself.
+    jump := len(currentChunk().code) - offset - 2
+
+    if jump > int(max(u16)) {
+        error("Too much code to jump over.")
+    }
+
+    currentChunk().code[offset] =  u8((jump >> 8) & 0xff)
+    currentChunk().code[offset + 1] = u8(jump & 0xff)
 }
 
 //
@@ -238,10 +269,89 @@ expressionStatement :: proc() {
     emitByte(OpCode.POP)
 }
 
+forStatement :: proc() {
+    beginScope()
+    consume(.LEFT_PAREN, "Expect '(' after 'for'.")
+    if match(.SEMICOLON) {
+        // No initializer.
+    } else if match(.VAR) {
+        varDeclaration()
+    } else {
+        expressionStatement()
+    }
+
+    loopStart := len(currentChunk().code)
+    exitJump := -1
+    if !match(.SEMICOLON) {
+        expression()
+        consume(.SEMICOLON, "Expect ';' after loop condition.")
+
+        // Jump out of the loop if the condition is false.
+        exitJump = emitJump(.JUMP_IF_FALSE)
+        emitByte(OpCode.POP)
+    }
+
+    if !match(.RIGHT_PAREN) {
+        bodyJump := emitJump(.JUMP)
+        incrementStart := len(currentChunk().code)
+        expression()
+        emitByte(OpCode.POP)
+        consume(.RIGHT_PAREN, "Expect ')' after for clauses.")
+
+        emitLoop(loopStart)
+        loopStart = incrementStart
+        patchJump(bodyJump)
+    }
+
+    statement()
+    emitLoop(loopStart)
+
+    if exitJump != -1 {
+        patchJump(exitJump)
+        emitByte(OpCode.POP)
+    }
+    endScope()
+}
+
+ifStatement :: proc() {
+    consume(.LEFT_PAREN, "Expect '(' after 'if'.")
+    expression()
+    consume(.RIGHT_PAREN, "Expect ')' after condition.")
+
+    thenJump := emitJump(OpCode.JUMP_IF_FALSE)
+    emitByte(OpCode.POP)
+    statement()
+
+    elseJump := emitJump(OpCode.JUMP)
+
+    patchJump(thenJump)
+    emitByte(OpCode.POP)
+
+    if match(.ELSE) {
+        statement()
+    }
+    patchJump(elseJump)
+}
+
 printStatement :: proc() {
     expression()
     consume(.SEMICOLON, "Expect ';' after value.")
     emitByte(OpCode.PRINT)
+}
+
+whileStatement :: proc() {
+    loopStart := len(currentChunk().code)
+    consume(.LEFT_PAREN, "Expect '(' after 'while'.")
+    expression()
+    consume(.RIGHT_PAREN, "Expect ')' after condition.")
+
+    exitJump := emitJump(.JUMP_IF_FALSE)
+    emitByte(OpCode.POP)
+    statement()
+    emitLoop(loopStart)
+
+    patchJump(exitJump)
+    emitByte(OpCode.POP)
 }
 
 syncronize :: proc() {
@@ -271,6 +381,12 @@ declaration :: proc() {
 statement :: proc() {
     if match(.PRINT) {
         printStatement()
+    } else if match(.FOR) {
+        forStatement()
+    } else if match(.IF) {
+        ifStatement()
+    } else if match(.WHILE) {
+        whileStatement()
     } else if match(.LEFT_BRACE) {
         beginScope()
         block()
@@ -289,6 +405,18 @@ number :: proc(canAssign: bool) {
     value := strconv.atof(parser.previous.value)
     emitConstant(Value{.NUMBER, value})
 }
+
+or_ :: proc(canAssign: bool) {
+    elseJump := emitJump(.JUMP_IF_FALSE)
+    endJump := emitJump(.JUMP)
+
+    patchJump(elseJump)
+    emitByte(OpCode.POP)
+
+    parsePrecedence(.OR)
+    patchJump(endJump)
+}
+
 
 lstring :: proc(canAssign: bool) {
     str := parser.previous.value[1:len(parser.previous.value)-1] // remove the "" from the string literal
@@ -356,20 +484,20 @@ rules: []ParseRule = {
     TokenType.IDENTIFIER    = ParseRule{ variable, nil,    .NONE },
     TokenType.STRING        = ParseRule{ lstring,  nil,    .NONE },
     TokenType.NUMBER        = ParseRule{ number,   nil,    .NONE },
-    TokenType.AND           = ParseRule{ nil,      nil,    .NONE },
+    TokenType.AND           = ParseRule{ nil,      and_,    .AND },
     TokenType.CLASS         = ParseRule{ nil,      nil,    .NONE },
     TokenType.ELSE          = ParseRule{ nil,      nil,    .NONE },
     TokenType.FALSE         = ParseRule{ literal,  nil,    .NONE },
     TokenType.FOR           = ParseRule{ nil,      nil,    .NONE },
     TokenType.FUN           = ParseRule{ nil,      nil,    .NONE },
     TokenType.IF            = ParseRule{ nil,      nil,    .NONE },
-    TokenType.NIL           = ParseRule{ literal,      nil,    .NONE },
-    TokenType.OR            = ParseRule{ nil,      nil,    .NONE },
+    TokenType.NIL           = ParseRule{ literal,  nil,    .NONE },
+    TokenType.OR            = ParseRule{ nil,      or_,    .OR   },
     TokenType.PRINT         = ParseRule{ nil,      nil,    .NONE },
     TokenType.RETURN        = ParseRule{ nil,      nil,    .NONE },
     TokenType.SUPER         = ParseRule{ nil,      nil,    .NONE },
     TokenType.THIS          = ParseRule{ nil,      nil,    .NONE },
-    TokenType.TRUE          = ParseRule{ literal,      nil,    .NONE },
+    TokenType.TRUE          = ParseRule{ literal,  nil,    .NONE },
     TokenType.VAR           = ParseRule{ nil,      nil,    .NONE },
     TokenType.WHILE         = ParseRule{ nil,      nil,    .NONE },
     TokenType.ERROR         = ParseRule{ nil,      nil,    .NONE },
@@ -468,6 +596,15 @@ defineVariable :: proc(global: u8) {
     }
 
     emitBytes(OpCode.DEFINE_GLOBAL, global)
+}
+
+and_ :: proc(canAssign: bool) {
+    endJump := emitJump(.JUMP_IF_FALSE)
+
+    emitByte(OpCode.POP)
+    parsePrecedence(.AND)
+
+    patchJump(endJump)
 }
 
 getRule :: proc(type: TokenType) -> ParseRule {
