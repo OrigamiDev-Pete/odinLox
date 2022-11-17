@@ -2,13 +2,22 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:time"
 
 DEBUG_STACK_TRACE :: false
-STACK_MAX :: 256
+FRAMES_MAX :: 64
+STACK_MAX :: FRAMES_MAX * cast(u32) max(u8)
+
+CallFrame :: struct {
+    function: ^ObjFunction,
+    ip: int,
+    slots: []Value,
+}
 
 VM :: struct {
-    chunk: Chunk,
-    ip: int,
+    frames: [FRAMES_MAX]CallFrame,
+    frameCount: u32,
+
     stack: [STACK_MAX]Value,
     stackIndex: i32,
     strings: Table,
@@ -24,8 +33,14 @@ InterpretResult :: enum {
 
 vm: VM
 
+clockNative :: proc(argCount: u8, args: []Value) -> Value {
+    return Value{.NUMBER, cast(f64) time.now()._nsec}
+}
+
 initVM :: proc() {
     resetStack()
+
+    defineNative("clock", clockNative)
 }
 
 freeVM :: proc() {
@@ -35,21 +50,18 @@ freeVM :: proc() {
 }
 
 interpret :: proc(source: string) -> InterpretResult {
-	chunk: Chunk
-	defer freeChunk(&chunk)
+    function := compile(source)
+    if (function == nil) { return .COMPILE_ERROR }
 
-	if !compile(source, &chunk) {
-		return .COMPILE_ERROR
-	}
-
-	vm.chunk = chunk
-	// vm.ip = vm.chunk.code[:]
-    vm.ip = 0;
+    push(Value{.OBJ, cast(^Obj)function})
+    vmCall(function, 0)
 
 	return run()
 }
 
 run :: proc() -> InterpretResult {
+    frame := &vm.frames[vm.frameCount - 1]
+
     for {
         when DEBUG_STACK_TRACE {
             fmt.printf("          ")
@@ -59,7 +71,7 @@ run :: proc() -> InterpretResult {
                 fmt.printf(" ]")
             }
             fmt.println()
-            disassembleInstruction(vm.chunk, vm.ip)
+            disassembleInstruction(frame.function.chunk, frame.ip)
         }
 
         instruction := cast(OpCode) readByte()
@@ -75,11 +87,11 @@ run :: proc() -> InterpretResult {
 
             case .GET_LOCAL:
                 slot := readByte()
-                push(vm.stack[slot])
+                push(frame.slots[slot])
 
             case .SET_LOCAL:
                 slot := readByte()
-                vm.stack[slot] = peek(0)
+                frame.slots[slot] = peek(0)
 
             case .GET_GLOBAL:
                 name := readString()
@@ -120,7 +132,6 @@ run :: proc() -> InterpretResult {
                 b := pop()
                 a := pop()
                 push(Value{ .BOOL, a.variant.(f64) < b.variant.(f64) })
-
 
             case .ADD:
                 v1, ok1 := peek(0).variant.(^Obj)
@@ -176,21 +187,38 @@ run :: proc() -> InterpretResult {
 
             case .JUMP:
                 offset := readShort()
-                vm.ip += int(offset)
+                frame.ip += int(offset)
 
             case .JUMP_IF_FALSE:
                 offset := readShort()
                 if isFalsey(peek(0)) {
-                    vm.ip += int(offset)
+                   frame.ip += int(offset)
                 }
 
             case .LOOP: 
                 offset := readShort()
-                vm.ip -= int(offset)
+                frame.ip -= int(offset)
+
+            case .CALL:
+                argCount := readByte()
+                if !callValue(peek(i32(argCount)), argCount) {
+                    return .RUNTIME_ERROR
+                }
+                frame = &vm.frames[vm.frameCount - 1]
 
             case .RETURN:
-                // Exit interpreter.
-                return .OK
+                result := pop()
+                vm.frameCount -= 1
+                if vm.frameCount == 0 {
+                    pop()
+                    return .OK
+                }
+
+                // log.debug("%v", vm.stackIndex)
+                vm.stackIndex -= i32(frame.function.arity) + 1
+                // log.debug("%v", vm.stackIndex)
+                push(result)
+                frame = &vm.frames[vm.frameCount - 1]
         }
     }
 }
@@ -217,6 +245,46 @@ peek :: proc(distance: i32) -> Value {
     return vm.stack[vm.stackIndex - 1 - distance]
 }
 
+// renamed from 'call' because of naming collision
+vmCall :: proc(function: ^ObjFunction, argCount: u8) -> bool {
+    if u32(argCount) != function.arity {
+        runtimeError("Expected %v arguments but got %v.", function.arity, argCount)
+        return false
+    }
+
+    if vm.frameCount == FRAMES_MAX {
+        runtimeError("Stack overflow.")
+        return false
+    }
+
+    frame := &vm.frames[vm.frameCount]
+    vm.frameCount += 1
+    frame.function = function
+    frame.ip = 0
+    // log.debug("%v", frame.slots)
+    frame.slots = vm.stack[vm.stackIndex - i32(argCount) - 1:]
+    // log.debug("%v", frame.slots[:10])
+    return true
+}
+
+callValue :: proc(callee: Value, argCount: u8) -> bool {
+    if callee.type == .OBJ {
+        #partial switch callee.variant.(^Obj).type {
+            case .FUNCTION:
+                return vmCall(cast(^ObjFunction)callee.variant.(^Obj), argCount)
+            case .NATIVE:
+                native_object := cast(^ObjNative)callee.variant.(^Obj)
+                native := native_object.function
+                result := native(argCount, vm.stack[vm.stackIndex - i32(argCount):])
+                vm.stackIndex -= i32(argCount) + 1
+                push(result)
+                return true
+        }
+    }
+    runtimeError("Can only call functions and classes.")
+    return false
+}
+
 isFalsey :: proc(value: Value) -> bool {
     return value.type == .NIL || (value.type == .BOOL && !value.variant.(bool))
 }
@@ -236,23 +304,22 @@ concatenate :: proc() {
 }
 
 readByte :: proc() -> (b: u8) {
-    // b = vm.ip[0]
-    b = currentChunk().code[vm.ip]
-    // vm.ip = vm.ip[1:]
-    vm.ip += 1
+    frame := &vm.frames[vm.frameCount - 1]
+    b = frame.function.chunk.code[frame.ip]
+    frame.ip += 1
     return
 }
 
 readShort :: proc() -> (s: u16) {
-    vm.ip += 2
-    // s = u16((vm.ip[0] << 8) | vm.ip[1])
-    s = u16((currentChunk().code[vm.ip - 2] << 8) | currentChunk().code[vm.ip - 1])
-    // vm.ip = vm.ip[2:]
+    frame := &vm.frames[vm.frameCount - 1]
+    frame.ip += 2
+    s = u16((frame.function.chunk.code[frame.ip - 2] << 8) | frame.function.chunk.code[frame.ip - 1])
     return
 }
 
 readConstant :: proc() -> Value {
-    return vm.chunk.constants[readByte()]
+    frame := &vm.frames[vm.frameCount - 1]
+    return frame.function.chunk.constants[readByte()]
 }
 
 readString :: proc() -> ^ObjString {
@@ -261,17 +328,33 @@ readString :: proc() -> ^ObjString {
 
 resetStack :: proc() {
     vm.stackIndex = 0
+    vm.frameCount = 0
 }
 
 runtimeError :: proc(format: string, args: ..any) {
     log.errorf(format, ..args)
-    // log.error()
 
-    // instruction_index := len(vm.chunk.code) - len(vm.ip) - 1
-    instruction_index := len(vm.chunk.code) - vm.ip - 1
-    line := vm.chunk.lines[instruction_index]
-    log.errorf("[line %v] in script\n", line)
+    for i := vm.frameCount-1; i >= 0; i -=1 {
+        frame := &vm.frames[i]
+        function := frame.function
+        instruction_index := len(function.chunk.code) - frame.ip - 1
+        log.errorf("[line %v] in", function.chunk.lines[instruction_index])
+        if function.name == nil {
+            log.error("script\n")
+        } else {
+            log.errorf("%v()\n", function.name.str)
+        }
+    }
+
     resetStack()
+}
+
+defineNative :: proc(name: string, function: NativeFn) {
+    push(Value{.OBJ, cast(^Obj) copyString(name)})
+    push(Value{.OBJ, cast(^Obj) newNative(function)})
+    tableSet(&vm.globals, cast(^ObjString) vm.stack[0].variant.(^Obj), vm.stack[1])
+    pop()
+    pop()
 }
 
 freeObjects :: proc() {

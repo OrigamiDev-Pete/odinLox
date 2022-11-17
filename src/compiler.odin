@@ -43,7 +43,16 @@ Local :: struct {
     depth: int,
 }
 
+FunctionType :: enum {
+    FUNCTION,
+    SCRIPT,
+}
+
 Compiler :: struct {
+    enclosing: ^Compiler,
+    function: ^ObjFunction,
+    type: FunctionType,
+
     locals: [U8_MAX + 1]Local,
     localCount: int,
     scopeDepth: int,
@@ -54,23 +63,22 @@ current: ^Compiler = nil
 compilingChunk: ^Chunk
 
 currentChunk :: proc() -> ^Chunk {
-    return compilingChunk
+    return &current.function.chunk
 }
 
 
-compile :: proc(source: string, chunk: ^Chunk) -> bool {
+compile :: proc(source: string) -> ^ObjFunction {
     initScanner(source)
     compiler: Compiler
-    initCompiler(&compiler)
-    compilingChunk = chunk
+    initCompiler(&compiler, .SCRIPT)
 
 	advance()
-	for (!match(.EOF)) {
+	for !match(.EOF) {
         declaration()
     }
 	consume(.EOF, "Expect end of expression.")
-    endCompiler()
-    return !parser.hadError
+    function := endCompiler()
+    return function if !parser.hadError else nil
 }
 
 advance :: proc() {
@@ -154,7 +162,9 @@ emitJump :: proc(instruction: OpCode) -> int {
 }
 
 emitReturn :: proc() {
-    writeChunk(currentChunk(), OpCode.RETURN, parser.previous.line)
+    emitByte(OpCode.NIL)
+    emitByte(OpCode.RETURN)
+    // writeChunk(currentChunk(), OpCode.RETURN, parser.previous.line)
 }
 
 emitConstant :: proc(value: Value) {
@@ -175,8 +185,20 @@ patchJump :: proc(offset: int) {
 
 //
 
-initCompiler :: proc(compiler: ^Compiler) {
+initCompiler :: proc(compiler: ^Compiler, type: FunctionType) {
+    compiler.enclosing = current
+    compiler.type = type
+    compiler.function = newFunction()
     current = compiler
+
+    if type != .SCRIPT {
+        current.function.name = copyString(parser.previous.value)
+    }
+
+    local := &current.locals[current.localCount]
+    current.localCount += 1
+    local.depth = 0
+    local.name.value = ""
 }
 
 makeConstant :: proc(value: Value) -> u8 {
@@ -189,13 +211,18 @@ makeConstant :: proc(value: Value) -> u8 {
     return cast(u8) constant
 }
 
-endCompiler :: proc() {
+endCompiler :: proc() -> ^ObjFunction {
     emitReturn()
+    function := current.function
+
     when DEBUG_PRINT_CODE {
         if !parser.hadError {
-            disassembleChunk(currentChunk()^, "code")
+            disassembleChunk(currentChunk()^, function.name.str if function.name != nil  else "<script>")
         }
     }
+
+    current = current.enclosing
+    return function
 }
 
 beginScope :: proc() {
@@ -230,6 +257,11 @@ binary :: proc(canAssign: bool) {
     }
 }
 
+call :: proc(canAssign: bool) {
+    argCount := argumentList()
+    emitBytes(.CALL, argCount)
+}
+
 literal :: proc(canAssign: bool) {
     #partial switch parser.previous.type {
         case .FALSE: emitByte(OpCode.FALSE)
@@ -248,6 +280,39 @@ block :: proc() {
     }
 
     consume(.RIGHT_BRACE, "Expect '}' after block.")
+}
+
+function :: proc(type: FunctionType) {
+    compiler: Compiler
+    initCompiler(&compiler, type)
+    beginScope()
+    
+    consume(.LEFT_PAREN, "Expect '(' after function name.")
+    if !check(.RIGHT_PAREN) {
+        for {
+            current.function.arity += 1
+            if current.function.arity > 255 {
+                errorAtCurrent("Can't have more than 255 parameters.")
+            }
+            constant := parseVariable("Expect parameter name.")
+            defineVariable(constant)
+
+            if !match(.COMMA) { break }
+        }
+    }
+    consume(.RIGHT_PAREN, "Expect ')' after parameters.")
+    consume(.LEFT_BRACE, "Expect '{' before function body.")
+    block()
+
+    function := endCompiler()
+    emitBytes(OpCode.CONSTANT, makeConstant(Value{.OBJ, cast(^Obj) function}))
+}
+
+funDeclaration :: proc() {
+    global := parseVariable("Expect function name.")
+    markInitialized()
+    function(.FUNCTION)
+    defineVariable(global)
 }
 
 varDeclaration :: proc() {
@@ -339,6 +404,20 @@ printStatement :: proc() {
     emitByte(OpCode.PRINT)
 }
 
+returnStatement :: proc() {
+    if current.type == .SCRIPT {
+        error("Can't return from  top-level code.")
+    }
+
+    if match(.SEMICOLON) {
+        emitReturn()
+    } else {
+        expression()
+        consume(.SEMICOLON, "Expect ';' after return value.")
+        emitByte(OpCode.RETURN)
+    }
+}
+
 whileStatement :: proc() {
     loopStart := len(currentChunk().code)
     consume(.LEFT_PAREN, "Expect '(' after 'while'.")
@@ -369,7 +448,9 @@ syncronize :: proc() {
 }
 
 declaration :: proc() {
-    if match(.VAR) {
+    if match(.FUN) {
+        funDeclaration()
+    } else if match(.VAR) {
         varDeclaration()
     } else {
         statement()
@@ -385,6 +466,8 @@ statement :: proc() {
         forStatement()
     } else if match(.IF) {
         ifStatement()
+    } else if match(.RETURN) {
+        returnStatement()
     } else if match(.WHILE) {
         whileStatement()
     } else if match(.LEFT_BRACE) {
@@ -462,7 +545,7 @@ unary :: proc(canAssign: bool) {
 }
 
 rules: []ParseRule = {
-    TokenType.LEFT_PAREN    = ParseRule{ grouping, nil,    .NONE },
+    TokenType.LEFT_PAREN    = ParseRule{ grouping, call,   .CALL },
     TokenType.RIGHT_PAREN   = ParseRule{ nil,      nil,    .NONE },
     TokenType.LEFT_BRACE    = ParseRule{ nil,      nil,    .NONE },
     TokenType.RIGHT_BRACE   = ParseRule{ nil,      nil,    .NONE },
@@ -586,6 +669,7 @@ parseVariable :: proc(errorMessage: string) -> u8 {
 }
 
 markInitialized :: proc() {
+    if current.scopeDepth == 0 { return }
     current.locals[current.localCount-1].depth = current.scopeDepth
 }
 
@@ -596,6 +680,22 @@ defineVariable :: proc(global: u8) {
     }
 
     emitBytes(OpCode.DEFINE_GLOBAL, global)
+}
+
+argumentList :: proc() -> u8 {
+    argCount: u8 = 0
+    if !check(.RIGHT_PAREN) {
+        for {
+            expression()
+            if argCount == 255 {
+                error("Can't have more than 255 arguments.")
+            }
+            argCount += 1
+            if !match(.COMMA) { break }
+        }
+    }
+    consume(.RIGHT_PAREN, "Expect ')' after arguments.")
+    return argCount
 }
 
 and_ :: proc(canAssign: bool) {

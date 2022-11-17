@@ -4,6 +4,8 @@ import "core:fmt"
 import "core:strings"
 
 ObjType :: enum {
+    FUNCTION,
+    NATIVE,
     STRING,
 }
 
@@ -12,10 +14,36 @@ Obj :: struct {
     next: ^Obj,
 }
 
+ObjFunction :: struct {
+    using obj: Obj,
+    arity: u32,
+    chunk: Chunk,
+    name: ^ObjString,
+}
+
+NativeFn :: proc (argCount: u8, args: []Value) -> Value
+
+ObjNative :: struct {
+    using obj: Obj,
+    function: NativeFn,
+}
+
 ObjString :: struct {
     using obj: Obj,
     str: string,
     hash: u32,
+}
+
+newFunction :: proc() -> ^ObjFunction {
+    function := allocateObject(ObjFunction, .FUNCTION)
+    
+    return function
+}
+
+newNative :: proc(function: NativeFn) -> ^ObjNative {
+    native := allocateObject(ObjNative, .NATIVE)
+    native.function = function
+    return native
 }
 
 isObjType :: proc(value: Value, type: ObjType) -> bool {
@@ -24,6 +52,8 @@ isObjType :: proc(value: Value, type: ObjType) -> bool {
 
 printObject :: proc(object: ^Obj) {
     switch object.type {
+        case .FUNCTION: printFunction(cast(^ObjFunction) object)
+        case .NATIVE: fmt.print("<native fn>")
         case .STRING: fmt.printf("%v", (cast(^ObjString) object).str)
         case: fmt.print(object)
     }
@@ -39,7 +69,15 @@ copyString :: proc(str: string) -> ^ObjString {
     return allocateString(s, hash)
 }
 
-allocateObject :: proc($T: typeid, type: ObjType) -> ^Obj {
+printFunction :: proc(function: ^ObjFunction) {
+    if (function.name == nil) {
+        fmt.printf("<script>")
+        return
+    }
+    fmt.printf("<fn %v>", function.name)
+}
+
+allocateObject :: proc($T: typeid, type: ObjType) -> ^T {
     object := new(T)
     object.type = type
     object.next = vm.objects
@@ -48,7 +86,7 @@ allocateObject :: proc($T: typeid, type: ObjType) -> ^Obj {
 }
 
 allocateString :: proc(str: string, hash: u32) -> ^ObjString {
-    lstring := cast(^ObjString) allocateObject(ObjString, .STRING)
+    lstring := allocateObject(ObjString, .STRING)
     lstring.str = str
     lstring.hash = hash
     tableSet(&vm.strings, lstring, Value{.NIL, nil})
@@ -78,6 +116,12 @@ takeString :: proc(str: string) -> ^ObjString {
 
 freeObject :: proc(object: ^Obj) {
     switch object.type {
+        case .FUNCTION:
+            function := cast(^ObjFunction) object
+            freeChunk(&function.chunk)
+            free(function)
+        case .NATIVE:
+            free(object)
         case .STRING:
             lstring := cast(^ObjString) object
             delete(lstring.str)
