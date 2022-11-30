@@ -41,6 +41,10 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return constantInstruction(.DEFINE_GLOBAL, chunk, offset)
     case .SET_GLOBAL:
         return constantInstruction(.SET_GLOBAL, chunk, offset)
+    case .GET_UPVALUE:
+        return byteInstruction(.GET_UPVALUE, chunk, offset)
+    case .SET_UPVALUE:
+        return byteInstruction(.SET_UPVALUE, chunk, offset)
     case .EQUAL:
         return simpleInstruction(.EQUAL, offset)
     case .GREATER:
@@ -69,6 +73,27 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return jumpInstruction(.LOOP, -1, chunk, offset)
     case .CALL:
         return byteInstruction(.CALL, chunk, offset)
+    case .CLOSURE:
+        offset := offset
+        offset += 1
+        constant := chunk.code[offset]
+        offset += 1
+        fmt.printf("%-16s %4d ", "CLOSURE", constant)
+        printValue(chunk.constants[constant])
+        fmt.println()
+
+        function := cast(^ObjFunction) chunk.constants[constant].variant.(^Obj)
+        for j in 0..<function.upvalueCount {
+            isLocal := bool(chunk.code[offset])
+            offset += 1
+            index := chunk.code[offset]
+            offset += 1
+            fmt.printf("%04d    |               %s %d\n", offset - 2, "local" if isLocal else "upvalue", index)
+        }
+        return offset
+
+    case .CLOSE_UPVALUE:
+        return simpleInstruction(.CLOSE_UPVALUE, offset)
     case .RETURN:
         return simpleInstruction(.RETURN, offset)
     case: // default

@@ -41,6 +41,12 @@ U8_MAX :: cast(int)max(u8)
 Local :: struct {
     name: Token,
     depth: int,
+    isCaptured: bool,
+}
+
+Upvalue :: struct {
+    index: u8,
+    isLocal: bool,
 }
 
 FunctionType :: enum {
@@ -55,6 +61,7 @@ Compiler :: struct {
 
     locals: [U8_MAX + 1]Local,
     localCount: int,
+    upvalues: [U8_MAX + 1]Upvalue,
     scopeDepth: int,
 }
 
@@ -233,7 +240,11 @@ endScope :: proc() {
     current.scopeDepth -= 1
 
     for current.localCount > 0 && current.locals[current.localCount - 1].depth > current.scopeDepth {
-        emitByte(OpCode.POP)
+        if current.locals[current.localCount - 1].isCaptured {
+            emitByte(OpCode.CLOSE_UPVALUE)
+        } else {
+            emitByte(OpCode.POP)
+        }
         current.localCount -= 1
     }
 }
@@ -305,7 +316,12 @@ function :: proc(type: FunctionType) {
     block()
 
     function := endCompiler()
-    emitBytes(OpCode.CONSTANT, makeConstant(Value{.OBJ, cast(^Obj) function}))
+    emitBytes(OpCode.CLOSURE, makeConstant(Value{.OBJ, cast(^Obj) function}))
+
+    for i in 0..<function.upvalueCount {
+        emitByte_u8(1 if compiler.upvalues[i].isLocal else 0)
+        emitByte(compiler.upvalues[i].index)
+    }
 }
 
 funDeclaration :: proc() {
@@ -512,6 +528,9 @@ namedVariable :: proc(name: ^Token, canAssign: bool) {
     if arg != -1 {
         getOp = .GET_LOCAL
         setOp = .SET_LOCAL
+    } else if arg = resolveUpvalue(current, name); arg != -1 {
+        getOp = .GET_UPVALUE
+        setOp = .SET_UPVALUE
     } else {
         arg = int(identifierConstant(name))
         getOp = .GET_GLOBAL
@@ -628,6 +647,44 @@ resolveLocal :: proc(compiler: ^Compiler, name: ^Token) -> int {
             return i
         }
     }
+    return -1
+}
+
+addUpvalue :: proc(compiler: ^Compiler, index: u8, isLocal: bool) -> int {
+    upvalueCount := &compiler.function.upvalueCount
+
+    for i in 0..<upvalueCount^ {
+        upvalue := &compiler.upvalues[i]
+        if upvalue.index == index && upvalue.isLocal == isLocal {
+            return i
+        }
+    }
+
+    if upvalueCount^ == U8_MAX {
+        error("Too many closure variables in function.")
+        return 0
+    }
+
+    compiler.upvalues[upvalueCount^].isLocal = isLocal
+    compiler.upvalues[upvalueCount^].index = index
+    upvalueCount^ += 1
+    return upvalueCount^
+}
+
+resolveUpvalue :: proc(compiler: ^Compiler, name: ^Token) -> int {
+    if compiler.enclosing == nil { return -1 }
+
+    local := resolveLocal(compiler.enclosing, name)
+    if local != -1 {
+        compiler.enclosing.locals[local].isCaptured = true
+        return addUpvalue(compiler, u8(local), true)
+    }
+
+    upvalue := resolveUpvalue(compiler.enclosing, name)
+    if upvalue != -1 {
+        return addUpvalue(compiler, u8(upvalue), false)
+    }
+
     return -1
 }
 

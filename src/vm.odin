@@ -9,7 +9,7 @@ FRAMES_MAX :: 64
 STACK_MAX :: FRAMES_MAX * cast(u32) max(u8)
 
 CallFrame :: struct {
-    function: ^ObjFunction,
+    closure: ^ObjClosure,
     ip: int,
     slots: []Value,
 }
@@ -22,6 +22,7 @@ VM :: struct {
     stackIndex: i32,
     strings: Table,
     globals: Table,
+    openUpvalues: ^ObjUpvalue,
     objects: ^Obj,
 }
 
@@ -54,7 +55,10 @@ interpret :: proc(source: string) -> InterpretResult {
     if (function == nil) { return .COMPILE_ERROR }
 
     push(Value{.OBJ, cast(^Obj)function})
-    vmCall(function, 0)
+    closure := newClosure(function)
+    pop()
+    push(Value{.OBJ, cast(^Obj) closure})
+    vmCall(closure, 0)
 
 	return run()
 }
@@ -71,7 +75,7 @@ run :: proc() -> InterpretResult {
                 fmt.printf(" ]")
             }
             fmt.println()
-            disassembleInstruction(frame.function.chunk, frame.ip)
+            disassembleInstruction(frame.closure.function.chunk, frame.ip)
         }
 
         instruction := cast(OpCode) readByte()
@@ -115,6 +119,14 @@ run :: proc() -> InterpretResult {
                     runtimeError("Undefined variable '%s'.", name.str)
                     return .RUNTIME_ERROR
                 }
+
+            case .GET_UPVALUE:
+                slot := readByte()
+                push(frame.closure.upvalues[slot-1].location^)
+
+            case .SET_UPVALUE:
+                slot := readByte()
+                frame.closure.upvalues[slot-1].location^ = peek(0)
 
             case .EQUAL:
                 b := pop()
@@ -206,8 +218,27 @@ run :: proc() -> InterpretResult {
                 }
                 frame = &vm.frames[vm.frameCount - 1]
 
+            case .CLOSURE:
+                function := cast(^ObjFunction) readConstant().variant.(^Obj)
+                closure := newClosure(function)
+                push(Value{.OBJ, cast(^Obj) closure})
+                for i in 0..<closure.upvalueCount {
+                    isLocal := bool(readByte())
+                    index := readByte()
+                    if isLocal {
+                        closure.upvalues[i] = captureUpvalue(&frame.slots[index]) // this could be wrong
+                    } else {
+                        closure.upvalues[i] = frame.closure.upvalues[index]
+                    }
+                }
+
+            case .CLOSE_UPVALUE:
+                closeUpvalues(&vm.stack[vm.stackIndex - 1])
+                pop()
+
             case .RETURN:
                 result := pop()
+                closeUpvalues(&frame.slots[0])
                 vm.frameCount -= 1
                 if vm.frameCount == 0 {
                     pop()
@@ -215,7 +246,7 @@ run :: proc() -> InterpretResult {
                 }
 
                 // log.debug("%v", vm.stackIndex)
-                vm.stackIndex -= i32(frame.function.arity) + 1
+                vm.stackIndex -= i32(frame.closure.function.arity) + 1
                 // log.debug("%v", vm.stackIndex)
                 push(result)
                 frame = &vm.frames[vm.frameCount - 1]
@@ -246,9 +277,9 @@ peek :: proc(distance: i32) -> Value {
 }
 
 // renamed from 'call' because of naming collision
-vmCall :: proc(function: ^ObjFunction, argCount: u8) -> bool {
-    if u32(argCount) != function.arity {
-        runtimeError("Expected %v arguments but got %v.", function.arity, argCount)
+vmCall :: proc(closure: ^ObjClosure, argCount: u8) -> bool {
+    if u32(argCount) != closure.function.arity {
+        runtimeError("Expected %v arguments but got %v.", closure.function.arity, argCount)
         return false
     }
 
@@ -259,7 +290,7 @@ vmCall :: proc(function: ^ObjFunction, argCount: u8) -> bool {
 
     frame := &vm.frames[vm.frameCount]
     vm.frameCount += 1
-    frame.function = function
+    frame.closure = closure
     frame.ip = 0
     // log.debug("%v", frame.slots)
     frame.slots = vm.stack[vm.stackIndex - i32(argCount) - 1:]
@@ -270,8 +301,8 @@ vmCall :: proc(function: ^ObjFunction, argCount: u8) -> bool {
 callValue :: proc(callee: Value, argCount: u8) -> bool {
     if callee.type == .OBJ {
         #partial switch callee.variant.(^Obj).type {
-            case .FUNCTION:
-                return vmCall(cast(^ObjFunction)callee.variant.(^Obj), argCount)
+            case .CLOSURE:
+                return vmCall(cast(^ObjClosure)callee.variant.(^Obj), argCount)
             case .NATIVE:
                 native_object := cast(^ObjNative)callee.variant.(^Obj)
                 native := native_object.function
@@ -283,6 +314,39 @@ callValue :: proc(callee: Value, argCount: u8) -> bool {
     }
     runtimeError("Can only call functions and classes.")
     return false
+}
+
+captureUpvalue :: proc(local: ^Value) -> ^ObjUpvalue {
+    prevUpvalue: ^ObjUpvalue
+    upvalue := vm.openUpvalues
+    for upvalue != nil && upvalue.location > local {
+        prevUpvalue = upvalue
+        upvalue = upvalue.nextUpvalue
+    }
+
+    if upvalue != nil && upvalue.location == local {
+        return upvalue
+    }
+
+    createdUpvalue := newUpvalue(local)
+    createdUpvalue.nextUpvalue = upvalue
+
+    if prevUpvalue == nil {
+        vm.openUpvalues = createdUpvalue
+    } else {
+        prevUpvalue.nextUpvalue = createdUpvalue
+    }
+
+    return createdUpvalue
+}
+
+closeUpvalues :: proc(last: ^Value) {
+    for vm.openUpvalues != nil && vm.openUpvalues.location >= last {
+        upvalue := vm.openUpvalues
+        upvalue.closed = upvalue.location^
+        upvalue.location = &upvalue.closed
+        vm.openUpvalues = upvalue.nextUpvalue
+    }
 }
 
 isFalsey :: proc(value: Value) -> bool {
@@ -305,7 +369,7 @@ concatenate :: proc() {
 
 readByte :: proc() -> (b: u8) {
     frame := &vm.frames[vm.frameCount - 1]
-    b = frame.function.chunk.code[frame.ip]
+    b = frame.closure.function.chunk.code[frame.ip]
     frame.ip += 1
     return
 }
@@ -313,13 +377,13 @@ readByte :: proc() -> (b: u8) {
 readShort :: proc() -> (s: u16) {
     frame := &vm.frames[vm.frameCount - 1]
     frame.ip += 2
-    s = u16((frame.function.chunk.code[frame.ip - 2] << 8) | frame.function.chunk.code[frame.ip - 1])
+    s = u16((frame.closure.function.chunk.code[frame.ip - 2] << 8) | frame.closure.function.chunk.code[frame.ip - 1])
     return
 }
 
 readConstant :: proc() -> Value {
     frame := &vm.frames[vm.frameCount - 1]
-    return frame.function.chunk.constants[readByte()]
+    return frame.closure.function.chunk.constants[readByte()]
 }
 
 readString :: proc() -> ^ObjString {
@@ -336,7 +400,7 @@ runtimeError :: proc(format: string, args: ..any) {
 
     for i := vm.frameCount-1; i >= 0; i -=1 {
         frame := &vm.frames[i]
-        function := frame.function
+        function := frame.closure.function
         instruction_index := len(function.chunk.code) - frame.ip - 1
         log.errorf("[line %v] in", function.chunk.lines[instruction_index])
         if function.name == nil {

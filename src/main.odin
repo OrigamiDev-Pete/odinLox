@@ -45,7 +45,7 @@ repl :: proc() {
 }
 
 runFile :: proc(path: string) {
-	fmt.println(os.get_current_directory())
+	// fmt.println(os.get_current_directory())
 	source, success := os.read_entire_file(path)
 	if (!success) {
 		fmt.printf("Could not open file \"%v\".\n", path)

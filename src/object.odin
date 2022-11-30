@@ -4,9 +4,11 @@ import "core:fmt"
 import "core:strings"
 
 ObjType :: enum {
+    CLOSURE,
     FUNCTION,
     NATIVE,
     STRING,
+    UPVALUE,
 }
 
 Obj :: struct {
@@ -17,6 +19,7 @@ Obj :: struct {
 ObjFunction :: struct {
     using obj: Obj,
     arity: u32,
+    upvalueCount: int,
     chunk: Chunk,
     name: ^ObjString,
 }
@@ -32,6 +35,20 @@ ObjString :: struct {
     using obj: Obj,
     str: string,
     hash: u32,
+}
+
+ObjUpvalue :: struct {
+    using obj: Obj,
+    location: ^Value,
+    closed: Value,
+    nextUpvalue: ^ObjUpvalue,
+}
+
+ObjClosure :: struct {
+    using obj: Obj,
+    function: ^ObjFunction,
+    upvalues: [dynamic]^ObjUpvalue,
+    upvalueCount: int,
 }
 
 newFunction :: proc() -> ^ObjFunction {
@@ -52,9 +69,11 @@ isObjType :: proc(value: Value, type: ObjType) -> bool {
 
 printObject :: proc(object: ^Obj) {
     switch object.type {
+        case .CLOSURE: printFunction((cast(^ObjClosure)object).function)
         case .FUNCTION: printFunction(cast(^ObjFunction) object)
         case .NATIVE: fmt.print("<native fn>")
         case .STRING: fmt.printf("%v", (cast(^ObjString) object).str)
+        case .UPVALUE: fmt.print("upvalue")
         case: fmt.print(object)
     }
 }
@@ -67,6 +86,13 @@ copyString :: proc(str: string) -> ^ObjString {
     if interned != nil { return interned }
 
     return allocateString(s, hash)
+}
+
+newUpvalue :: proc(slot: ^Value) -> ^ObjUpvalue {
+    upvalue := allocateObject(ObjUpvalue, .UPVALUE)
+    upvalue.closed = Value{.NIL, nil}
+    upvalue.location = slot
+    return upvalue
 }
 
 printFunction :: proc(function: ^ObjFunction) {
@@ -83,6 +109,16 @@ allocateObject :: proc($T: typeid, type: ObjType) -> ^T {
     object.next = vm.objects
     vm.objects = object
     return object
+}
+
+newClosure :: proc(function: ^ObjFunction) -> (closure: ^ObjClosure) {
+    upvalues := make([dynamic]^ObjUpvalue, function.upvalueCount)
+    
+    closure = allocateObject(ObjClosure, .CLOSURE)
+    closure.function = function
+    closure.upvalues = upvalues
+    closure.upvalueCount = function.upvalueCount
+    return
 }
 
 allocateString :: proc(str: string, hash: u32) -> ^ObjString {
@@ -116,6 +152,8 @@ takeString :: proc(str: string) -> ^ObjString {
 
 freeObject :: proc(object: ^Obj) {
     switch object.type {
+        case .CLOSURE:
+            free(object)
         case .FUNCTION:
             function := cast(^ObjFunction) object
             freeChunk(&function.chunk)
@@ -126,5 +164,9 @@ freeObject :: proc(object: ^Obj) {
             lstring := cast(^ObjString) object
             delete(lstring.str)
             free(lstring)
+        case .UPVALUE:
+            free(object)
+            closure := cast(^ObjClosure) object
+            delete(closure.upvalues)
     }
 }

@@ -5,15 +5,24 @@
 //
 //add(1, 2);
 
-fun fib(n) {
-    if (n < 2) {
-        return n;
+//fun fib(n) {
+//    if (n < 2) {
+//        return n;
+//    }
+//    return fib(n - 2) + fib(n - 1);
+//}
+
+// var start = clock();
+// print fib(25);
+// print clock() - start;
+
+fun outer() {
+    var x = "outside";
+    fun inner() {
+        print x;
     }
-    return fib(n - 2) + fib(n - 1);
+    return inner;
 }
-
-var start = clock();
-print fib(25);
-print clock() - start;
-
+var closure = outer();
+closure();
 
