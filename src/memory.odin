@@ -4,7 +4,7 @@ import "core:log"
 import "core:fmt"
 
 DEBUG_STRESS_GC :: false
-DEBUG_LOG_GC :: true
+DEBUG_LOG_GC :: false
 
 GC_HEAP_GROW_FACTOR :: 2
 
@@ -63,6 +63,10 @@ blackenObject :: proc(object: ^Obj) {
     }
 
     switch object.type {
+        case .CLASS: {
+            klass := cast(^ObjClass)object
+            markObject(klass.name)
+        }
         case .CLOSURE: {
             closure := cast(^ObjClosure)object
             markObject(closure.function)
@@ -74,6 +78,11 @@ blackenObject :: proc(object: ^Obj) {
             function := cast(^ObjFunction)object
             markObject(function.name)
             markArray(&function.chunk.constants)
+        }
+        case .INSTANCE: {
+            instance := cast(^ObjInstance)object
+            markObject(instance.klass)
+            markTable(&instance.fields)
         }
         case .UPVALUE:
             markValue((cast(^ObjUpvalue)object).closed)

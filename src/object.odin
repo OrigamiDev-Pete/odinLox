@@ -5,8 +5,10 @@ import "core:fmt"
 import "core:strings"
 
 ObjType :: enum {
+    CLASS,
     CLOSURE,
     FUNCTION,
+    INSTANCE,
     NATIVE,
     STRING,
     UPVALUE,
@@ -46,6 +48,17 @@ ObjUpvalue :: struct {
     nextUpvalue: ^ObjUpvalue,
 }
 
+ObjClass :: struct {
+    using obj: Obj,
+    name: ^ObjString,
+}
+
+ObjInstance :: struct {
+    using obj: Obj,
+    klass: ^ObjClass,
+    fields: Table,
+}
+
 ObjClosure :: struct {
     using obj: Obj,
     function: ^ObjFunction,
@@ -57,6 +70,12 @@ newFunction :: proc() -> ^ObjFunction {
     function := allocateObject(ObjFunction, .FUNCTION)
     
     return function
+}
+
+newInstance :: proc(klass: ^ObjClass) -> ^ObjInstance {
+    instance := allocateObject(ObjInstance, .INSTANCE)
+    instance.klass = klass
+    return instance
 }
 
 newNative :: proc(function: NativeFn) -> ^ObjNative {
@@ -71,10 +90,12 @@ isObjType :: proc(value: Value, type: ObjType) -> bool {
 
 printObject :: proc(object: ^Obj) {
     switch object.type {
+        case .CLASS: fmt.printf("%v", (cast(^ObjClass)object).name.str)
         case .CLOSURE: printFunction((cast(^ObjClosure)object).function)
-        case .FUNCTION: printFunction(cast(^ObjFunction) object)
+        case .FUNCTION: printFunction(cast(^ObjFunction)object)
+        case .INSTANCE: fmt.printf("%v instance", (cast(^ObjInstance)object).klass.name.str)
         case .NATIVE: fmt.print("<native fn>")
-        case .STRING: fmt.printf("%v", (cast(^ObjString) object).str)
+        case .STRING: fmt.printf("%v", (cast(^ObjString)object).str)
         case .UPVALUE: fmt.print("upvalue")
         case: fmt.print(object)
     }
@@ -121,6 +142,12 @@ allocateObject :: proc($T: typeid, type: ObjType) -> ^T {
     }
 
     return object
+}
+
+newClass :: proc(name: ^ObjString) -> ^ObjClass {
+    klass := allocateObject(ObjClass, .CLASS)
+    klass.name = name
+    return klass
 }
 
 newClosure :: proc(function: ^ObjFunction) -> (closure: ^ObjClosure) {
@@ -172,6 +199,9 @@ freeObject :: proc(object: ^Obj) {
     }
 
     switch object.type {
+        case .CLASS:
+            vm.bytesAllocated -= size_of(object)
+            free(object)
         case .CLOSURE:
             vm.bytesAllocated -= size_of(object)
             free(object)
@@ -183,6 +213,11 @@ freeObject :: proc(object: ^Obj) {
             freeChunk(&function.chunk)
             vm.bytesAllocated -= size_of(function)
             free(function)
+        case .INSTANCE:
+            instance := cast(^ObjInstance)object
+            freeTable(&instance.fields)
+            vm.bytesAllocated -= size_of(object)
+            free(object)
         case .NATIVE:
             vm.bytesAllocated -= size_of(object)
             free(object)

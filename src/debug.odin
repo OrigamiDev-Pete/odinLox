@@ -45,6 +45,10 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return byteInstruction(.GET_UPVALUE, chunk, offset)
     case .SET_UPVALUE:
         return byteInstruction(.SET_UPVALUE, chunk, offset)
+    case .GET_PROPERTY:
+        return constantInstruction(.GET_PROPERTY, chunk, offset)
+    case .SET_PROPERTY:
+        return constantInstruction(.SET_PROPERTY, chunk, offset)
     case .EQUAL:
         return simpleInstruction(.EQUAL, offset)
     case .GREATER:
@@ -96,6 +100,8 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return simpleInstruction(.CLOSE_UPVALUE, offset)
     case .RETURN:
         return simpleInstruction(.RETURN, offset)
+    case .CLASS:
+        return constantInstruction(.CLASS, chunk, offset)
     case: // default
         return offset + 1
     }

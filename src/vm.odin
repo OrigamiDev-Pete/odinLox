@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:log"
 import "core:time"
 
-DEBUG_STACK_TRACE :: true
+DEBUG_STACK_TRACE :: false
 FRAMES_MAX :: 64
 STACK_MAX :: FRAMES_MAX * cast(u32) max(u8)
 
@@ -134,6 +134,38 @@ run :: proc() -> InterpretResult {
                 slot := readByte()
                 frame.closure.upvalues[slot-1].location^ = peek(0)
 
+            case .GET_PROPERTY: {
+                if peek(0).variant.(^Obj).type != .INSTANCE {
+                    runtimeError("Only instances have properties.")
+                    return .RUNTIME_ERROR
+                }
+
+                instance := cast(^ObjInstance)peek(0).variant.(^Obj)
+                name := readString()
+
+                value: Value
+                if value, ok := tableGet(&instance.fields, name); ok {
+                    pop() // instance
+                    push(value)
+                    break
+                }
+
+                runtimeError("Undefined property '%v'.", name.str)
+                return .RUNTIME_ERROR
+            }
+
+            case .SET_PROPERTY: {
+                if peek(1).variant.(^Obj).type != .INSTANCE {
+                    runtimeError("Only instances have properties.")
+                    return .RUNTIME_ERROR
+                }
+
+                instance := cast(^ObjInstance)peek(1).variant.(^Obj)
+                tableSet(&instance.fields, readString(), peek(0))
+                value := pop()
+                push(value)
+            }
+
             case .EQUAL:
                 b := pop()
                 a := pop()
@@ -256,6 +288,9 @@ run :: proc() -> InterpretResult {
                 // log.debug("%v", vm.stackIndex)
                 push(result)
                 frame = &vm.frames[vm.frameCount - 1]
+
+            case .CLASS:
+                push(Value{.OBJ, cast(^Obj)newClass(readString())})
         }
     }
 }
@@ -307,6 +342,11 @@ vmCall :: proc(closure: ^ObjClosure, argCount: u8) -> bool {
 callValue :: proc(callee: Value, argCount: u8) -> bool {
     if callee.type == .OBJ {
         #partial switch callee.variant.(^Obj).type {
+            case .CLASS: {
+                klass := cast(^ObjClass)callee.variant.(^Obj)
+                vm.stack[vm.stackIndex - i32(argCount) - 1] = Value{.OBJ, cast(^Obj)newInstance(klass)}
+                return true
+            }
             case .CLOSURE:
                 return vmCall(cast(^ObjClosure)callee.variant.(^Obj), argCount)
             case .NATIVE:

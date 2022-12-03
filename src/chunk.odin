@@ -15,6 +15,8 @@ OpCode :: enum u8 {
     SET_GLOBAL,
     GET_UPVALUE,
     SET_UPVALUE,
+    GET_PROPERTY,
+    SET_PROPERTY,
     EQUAL,
     GREATER,
     LESS,
@@ -32,6 +34,7 @@ OpCode :: enum u8 {
     CLOSURE,
     CLOSE_UPVALUE,
     RETURN,
+    CLASS,
 }
 
 Chunk :: struct {

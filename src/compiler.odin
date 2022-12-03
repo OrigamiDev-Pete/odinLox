@@ -5,7 +5,7 @@ import "core:log"
 import "core:strconv"
 import "core:strings"
 
-DEBUG_PRINT_CODE :: true
+DEBUG_PRINT_CODE :: false
 
 Parser :: struct {
 	current: Token,
@@ -280,6 +280,18 @@ call :: proc(canAssign: bool) {
     emitBytes(.CALL, argCount)
 }
 
+dot :: proc(canAssign: bool) {
+    consume(.IDENTIFIER, "Expect property name after '.'.")
+    name := identifierConstant(&parser.previous)
+
+    if canAssign && match(.EQUAL) {
+        expression()
+        emitBytes(OpCode.SET_PROPERTY, name)
+    } else {
+        emitBytes(OpCode.GET_PROPERTY, name)
+    }
+}
+
 literal :: proc(canAssign: bool) {
     #partial switch parser.previous.type {
         case .FALSE: emitByte(OpCode.FALSE)
@@ -329,6 +341,18 @@ function :: proc(type: FunctionType) {
         emitByte_u8(1 if compiler.upvalues[i].isLocal else 0)
         emitByte(compiler.upvalues[i].index)
     }
+}
+
+classDeclaration :: proc() {
+    consume(.IDENTIFIER, "Expect class name.")
+    nameConstant := identifierConstant(&parser.previous)
+    declareVariable()
+
+    emitBytes(OpCode.CLASS, nameConstant)
+    defineVariable(nameConstant)
+
+    consume(.LEFT_BRACE, "Expect '{' before class body.")
+    consume(.RIGHT_BRACE, "Expect '}' after class body.")
 }
 
 funDeclaration :: proc() {
@@ -471,7 +495,9 @@ syncronize :: proc() {
 }
 
 declaration :: proc() {
-    if match(.FUN) {
+    if match(.CLASS) {
+        classDeclaration()
+    } else if match(.FUN) {
         funDeclaration()
     } else if match(.VAR) {
         varDeclaration()
@@ -576,7 +602,7 @@ rules: []ParseRule = {
     TokenType.LEFT_BRACE    = ParseRule{ nil,      nil,    .NONE },
     TokenType.RIGHT_BRACE   = ParseRule{ nil,      nil,    .NONE },
     TokenType.COMMA         = ParseRule{ nil,      nil,    .NONE },
-    TokenType.DOT           = ParseRule{ nil,      nil,    .NONE },
+    TokenType.DOT           = ParseRule{ nil,      dot,    .CALL },
     TokenType.MINUS         = ParseRule{ unary,    binary, .TERM },
     TokenType.PLUS          = ParseRule{ nil,      binary, .TERM },
     TokenType.SEMICOLON     = ParseRule{ nil,      nil,    .NONE },
