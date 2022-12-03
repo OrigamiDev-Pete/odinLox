@@ -1,5 +1,6 @@
 package main
 
+import "core:log"
 import "core:fmt"
 import "core:strings"
 
@@ -13,6 +14,7 @@ ObjType :: enum {
 
 Obj :: struct {
     type: ObjType,
+    isMarked: bool,
     next: ^Obj,
 }
 
@@ -108,6 +110,16 @@ allocateObject :: proc($T: typeid, type: ObjType) -> ^T {
     object.type = type
     object.next = vm.objects
     vm.objects = object
+
+    vm.bytesAllocated += size_of(T)
+    if (vm.bytesAllocated > vm.nextGC) {
+        collectGarbage()
+    }
+
+    when DEBUG_LOG_GC {
+        log.debugf("%p allocate %v for %v", object, size_of(T), type)
+    }
+
     return object
 }
 
@@ -125,7 +137,11 @@ allocateString :: proc(str: string, hash: u32) -> ^ObjString {
     lstring := allocateObject(ObjString, .STRING)
     lstring.str = str
     lstring.hash = hash
+
+    push(Value{.OBJ, cast(^Obj)lstring})
     tableSet(&vm.strings, lstring, Value{.NIL, nil})
+    pop()
+
     return lstring
 }
 
@@ -151,22 +167,36 @@ takeString :: proc(str: string) -> ^ObjString {
 }
 
 freeObject :: proc(object: ^Obj) {
+    when DEBUG_LOG_GC {
+        log.debugf("%p free type %v", object, object.type)
+    }
+
     switch object.type {
         case .CLOSURE:
+            vm.bytesAllocated -= size_of(object)
             free(object)
         case .FUNCTION:
+            vm.bytesAllocated -= size_of(object)
+            free(object)
             function := cast(^ObjFunction) object
+            vm.bytesAllocated -= size_of(function.chunk)
             freeChunk(&function.chunk)
+            vm.bytesAllocated -= size_of(function)
             free(function)
         case .NATIVE:
+            vm.bytesAllocated -= size_of(object)
             free(object)
         case .STRING:
             lstring := cast(^ObjString) object
+            vm.bytesAllocated -= size_of(lstring.str)
             delete(lstring.str)
+            vm.bytesAllocated -= size_of(lstring)
             free(lstring)
         case .UPVALUE:
+            vm.bytesAllocated -= size_of(object)
             free(object)
             closure := cast(^ObjClosure) object
+            vm.bytesAllocated -= size_of(closure.upvalues)
             delete(closure.upvalues)
     }
 }

@@ -73,6 +73,22 @@ tableFindString :: proc(table: ^Table, str: string, hash: u32) -> ^ObjString {
     }
 }
 
+tableRemoveWhite :: proc(table: ^Table) {
+    for entry in table.entries {
+        if entry.key != nil && !entry.key.obj.isMarked {
+            tableDelete(table, entry.key)
+        }
+    }
+}
+
+markTable :: proc(table: ^Table) {
+    for i in 0..<table.capacity {
+        entry := &table.entries[i]
+        markObject(entry.key)
+        markValue(entry.value)
+    }
+}
+
 findEntry :: proc(entries: []Entry, capacity: int, key: ^ObjString) -> ^Entry {
     index := key.hash % u32(capacity)
     tombstone: ^Entry = nil

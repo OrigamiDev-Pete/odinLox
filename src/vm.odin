@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:log"
 import "core:time"
 
-DEBUG_STACK_TRACE :: false
+DEBUG_STACK_TRACE :: true
 FRAMES_MAX :: 64
 STACK_MAX :: FRAMES_MAX * cast(u32) max(u8)
 
@@ -23,7 +23,12 @@ VM :: struct {
     strings: Table,
     globals: Table,
     openUpvalues: ^ObjUpvalue,
+
+    bytesAllocated: int,
+    nextGC: int,
     objects: ^Obj,
+    grayStack: [dynamic]^Obj,
+    grayCount: int,
 }
 
 InterpretResult :: enum {
@@ -40,6 +45,7 @@ clockNative :: proc(argCount: u8, args: []Value) -> Value {
 
 initVM :: proc() {
     resetStack()
+    vm.nextGC = 1024 * 1024
 
     defineNative("clock", clockNative)
 }
@@ -354,8 +360,8 @@ isFalsey :: proc(value: Value) -> bool {
 }
 
 concatenate :: proc() {
-    b := cast(^ObjString) pop().variant.(^Obj)
-    a := cast(^ObjString) pop().variant.(^Obj)
+    b := cast(^ObjString) peek(0).variant.(^Obj)
+    a := cast(^ObjString) peek(1).variant.(^Obj)
 
     length := len(a.str) + len(b.str)
     chars := make([]byte, length)
@@ -364,6 +370,8 @@ concatenate :: proc() {
     copy(chars[i:], b.str)
 
     result := takeString(string(chars))
+    pop()
+    pop()
     push(Value{.OBJ, cast(^Obj)result})
 }
 
@@ -428,4 +436,6 @@ freeObjects :: proc() {
         freeObject(object)
         object = next
     }
+
+    delete(vm.grayStack);
 }

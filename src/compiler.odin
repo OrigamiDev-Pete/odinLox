@@ -5,7 +5,7 @@ import "core:log"
 import "core:strconv"
 import "core:strings"
 
-DEBUG_PRINT_CODE :: false
+DEBUG_PRINT_CODE :: true
 
 Parser :: struct {
 	current: Token,
@@ -73,7 +73,6 @@ currentChunk :: proc() -> ^Chunk {
     return &current.function.chunk
 }
 
-
 compile :: proc(source: string) -> ^ObjFunction {
     initScanner(source)
     compiler: Compiler
@@ -86,6 +85,14 @@ compile :: proc(source: string) -> ^ObjFunction {
 	consume(.EOF, "Expect end of expression.")
     function := endCompiler()
     return function if !parser.hadError else nil
+}
+
+markCompilerRoots :: proc() {
+    compiler := current
+    for compiler != nil {
+        markObject(compiler.function)
+        compiler = compiler.enclosing
+    }
 }
 
 advance :: proc() {

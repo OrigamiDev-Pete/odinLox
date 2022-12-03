@@ -26,6 +26,13 @@ main :: proc() {
 		fmt.println("Usage: olox [path]")
 		os.exit(64)
 	}
+
+	for _, leak in tracking_allocator.allocation_map {
+		log.warnf("%v leaked %v bytes", leak.location, leak.size)
+	}
+	for bad_free in tracking_allocator.bad_free_array {
+		log.warnf("%v allocation %p was freed badly", bad_free.location, bad_free.memory)
+	}
 }
 
 repl :: proc() {

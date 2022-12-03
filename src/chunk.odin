@@ -47,6 +47,9 @@ freeChunk :: proc(c: ^Chunk) {
 
 @(private = "file")
 writeChunk_proc :: proc(c: ^Chunk, byte: u8, line: int) {
+    if DEBUG_STRESS_GC {
+        collectGarbage()
+    }
     append(&c.code, byte)
     append(&c.lines, line)
 } 
@@ -72,6 +75,11 @@ writeChunk :: proc {
 }
 
 addConstant :: proc(c: ^Chunk, value: Value) -> int {
+    if DEBUG_STRESS_GC {
+        collectGarbage()
+    }
+    push(value)
     append(&c.constants, value)
+    pop()
     return len(c.constants) - 1
 }
