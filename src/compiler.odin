@@ -51,6 +51,8 @@ Upvalue :: struct {
 
 FunctionType :: enum {
     FUNCTION,
+    INITIALIZER,
+    METHOD,
     SCRIPT,
 }
 
@@ -65,8 +67,13 @@ Compiler :: struct {
     scopeDepth: int,
 }
 
+ClassCompiler :: struct {
+    enclosing: ^ClassCompiler,
+}
+
 parser: Parser
 current: ^Compiler = nil
+currentClass: ^ClassCompiler = nil
 compilingChunk: ^Chunk
 
 currentChunk :: proc() -> ^Chunk {
@@ -176,9 +183,12 @@ emitJump :: proc(instruction: OpCode) -> int {
 }
 
 emitReturn :: proc() {
-    emitByte(OpCode.NIL)
+    if current.type == .INITIALIZER {
+        emitBytes(OpCode.GET_LOCAL, 0)
+    } else {
+        emitByte(OpCode.NIL)
+    }
     emitByte(OpCode.RETURN)
-    // writeChunk(currentChunk(), OpCode.RETURN, parser.previous.line)
 }
 
 emitConstant :: proc(value: Value) {
@@ -213,6 +223,12 @@ initCompiler :: proc(compiler: ^Compiler, type: FunctionType) {
     current.localCount += 1
     local.depth = 0
     local.name.value = ""
+
+    if type != .FUNCTION {
+        local.name.value = "this"
+    } else {
+        local.name.value = ""
+    }
 }
 
 makeConstant :: proc(value: Value) -> u8 {
@@ -287,6 +303,10 @@ dot :: proc(canAssign: bool) {
     if canAssign && match(.EQUAL) {
         expression()
         emitBytes(OpCode.SET_PROPERTY, name)
+    } else if match(.LEFT_PAREN) {
+        argCount := argumentList()
+        emitBytes(OpCode.INVOKE, name)
+        emitByte(argCount)
     } else {
         emitBytes(OpCode.GET_PROPERTY, name)
     }
@@ -343,16 +363,39 @@ function :: proc(type: FunctionType) {
     }
 }
 
+method :: proc() {
+    consume(.IDENTIFIER, "Expect method name.")
+    constant := identifierConstant(&parser.previous)
+
+    type := FunctionType.METHOD
+    if len(parser.previous.value) == 4 && strings.compare(parser.previous.value, "init") == 0 {
+        type = .INITIALIZER
+    }
+    function(type)
+    emitBytes(OpCode.METHOD, constant)
+}
+
 classDeclaration :: proc() {
     consume(.IDENTIFIER, "Expect class name.")
+    className := parser.previous
     nameConstant := identifierConstant(&parser.previous)
     declareVariable()
 
     emitBytes(OpCode.CLASS, nameConstant)
     defineVariable(nameConstant)
 
+    classCompiler := ClassCompiler{currentClass}
+    currentClass = &classCompiler
+
+    namedVariable(&className, false)
     consume(.LEFT_BRACE, "Expect '{' before class body.")
+    for !check(.RIGHT_BRACE) && !check(.EOF) {
+        method()
+    }
     consume(.RIGHT_BRACE, "Expect '}' after class body.")
+    emitByte(OpCode.POP)
+
+    currentClass = currentClass.enclosing
 }
 
 funDeclaration :: proc() {
@@ -459,6 +502,9 @@ returnStatement :: proc() {
     if match(.SEMICOLON) {
         emitReturn()
     } else {
+        if current.type == .INITIALIZER {
+            error("Can't return a value from an initializer.")
+        }
         expression()
         consume(.SEMICOLON, "Expect ';' after return value.")
         emitByte(OpCode.RETURN)
@@ -583,6 +629,14 @@ variable :: proc(canAssign: bool) {
     namedVariable(&parser.previous, canAssign)
 }
 
+this :: proc(canAssign: bool) {
+    if currentClass == nil {
+        error("Can't use 'this' outside of a class.")
+        return
+    }
+    variable(false)
+}
+
 unary :: proc(canAssign: bool) {
     operatorType := parser.previous.type
 
@@ -631,7 +685,7 @@ rules: []ParseRule = {
     TokenType.PRINT         = ParseRule{ nil,      nil,    .NONE },
     TokenType.RETURN        = ParseRule{ nil,      nil,    .NONE },
     TokenType.SUPER         = ParseRule{ nil,      nil,    .NONE },
-    TokenType.THIS          = ParseRule{ nil,      nil,    .NONE },
+    TokenType.THIS          = ParseRule{ this,    nil,    .NONE },
     TokenType.TRUE          = ParseRule{ literal,  nil,    .NONE },
     TokenType.VAR           = ParseRule{ nil,      nil,    .NONE },
     TokenType.WHILE         = ParseRule{ nil,      nil,    .NONE },

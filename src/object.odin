@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:strings"
 
 ObjType :: enum {
+    BOUND_METHOD,
     CLASS,
     CLOSURE,
     FUNCTION,
@@ -51,6 +52,7 @@ ObjUpvalue :: struct {
 ObjClass :: struct {
     using obj: Obj,
     name: ^ObjString,
+    methods: Table,
 }
 
 ObjInstance :: struct {
@@ -64,6 +66,19 @@ ObjClosure :: struct {
     function: ^ObjFunction,
     upvalues: [dynamic]^ObjUpvalue,
     upvalueCount: int,
+}
+
+ObjBoundMethod :: struct {
+    using obj: Obj,
+    receiver: Value,
+    method: ^ObjClosure,
+}
+
+newBoundMethod :: proc(receiver: Value, method: ^ObjClosure) -> ^ObjBoundMethod {
+    bound := allocateObject(ObjBoundMethod, .BOUND_METHOD)
+    bound.receiver = receiver
+    bound.method = method
+    return bound
 }
 
 newFunction :: proc() -> ^ObjFunction {
@@ -90,12 +105,13 @@ isObjType :: proc(value: Value, type: ObjType) -> bool {
 
 printObject :: proc(object: ^Obj) {
     switch object.type {
-        case .CLASS: fmt.printf("%v", (cast(^ObjClass)object).name.str)
-        case .CLOSURE: printFunction((cast(^ObjClosure)object).function)
-        case .FUNCTION: printFunction(cast(^ObjFunction)object)
-        case .INSTANCE: fmt.printf("%v instance", (cast(^ObjInstance)object).klass.name.str)
+        case .BOUND_METHOD: printFunction((cast(^ObjBoundMethod) object).method.function)
+        case .CLASS: fmt.printf("%v", (cast(^ObjClass) object).name.str)
+        case .CLOSURE: printFunction((cast(^ObjClosure) object).function)
+        case .FUNCTION: printFunction(cast(^ObjFunction) object)
+        case .INSTANCE: fmt.printf("%v instance", (cast(^ObjInstance) object).klass.name.str)
         case .NATIVE: fmt.print("<native fn>")
-        case .STRING: fmt.printf("%v", (cast(^ObjString)object).str)
+        case .STRING: fmt.printf("%v", (cast(^ObjString) object).str)
         case .UPVALUE: fmt.print("upvalue")
         case: fmt.print(object)
     }
@@ -199,7 +215,13 @@ freeObject :: proc(object: ^Obj) {
     }
 
     switch object.type {
+        case .BOUND_METHOD:
+            vm.bytesAllocated -= size_of(object)
+            free(object)
         case .CLASS:
+            klass := cast(^ObjClass)object
+            vm.bytesAllocated -= size_of(klass.methods)
+            freeTable(&klass.methods)
             vm.bytesAllocated -= size_of(object)
             free(object)
         case .CLOSURE:

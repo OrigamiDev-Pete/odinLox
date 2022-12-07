@@ -16,13 +16,27 @@
 // print fib(25);
 // print clock() - start;
 
-fun outer() {
-    var x = "outside";
-    fun inner() {
-        print x;
+// fun outer() {
+//     var x = "outside";
+//     fun inner() {
+//         print x;
+//     }
+//     return inner;
+// }
+// var closure = outer();
+// closure();
+
+class CoffeeMaker {
+    init(coffee) {
+        this.coffee = coffee;
     }
-    return inner;
+
+    brew() {
+        print "Enjoy you cup of " + this.coffee;
+        this.coffee = nil;
+    }
 }
-var closure = outer();
-closure();
+
+var maker = CoffeeMaker("coffee and chicory");
+maker.brew();
 

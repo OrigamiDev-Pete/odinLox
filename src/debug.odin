@@ -1,3 +1,4 @@
+//+private
 package main
 
 import "core:fmt"
@@ -59,6 +60,8 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return simpleInstruction(.ADD, offset)
     case .SUBTRACT:
         return simpleInstruction(.SUBTRACT, offset)
+    case .METHOD:
+        return constantInstruction(.METHOD, chunk, offset)
     case .MULTIPLY:
         return simpleInstruction(.MULTIPLY, offset)
     case .DIVIDE:
@@ -77,6 +80,8 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         return jumpInstruction(.LOOP, -1, chunk, offset)
     case .CALL:
         return byteInstruction(.CALL, chunk, offset)
+    case .INVOKE:
+        return invokeInstruction(.INVOKE, chunk, offset)
     case .CLOSURE:
         offset := offset
         offset += 1
@@ -140,3 +145,13 @@ constantInstruction :: proc(name: OpCode, chunk: Chunk, offset: int) -> int {
     fmt.printf("'\n")
     return offset + 2
 }
+
+invokeInstruction :: proc(name: OpCode, chunk: Chunk, offset: int) -> int {
+    constant := chunk.code[offset + 1]
+    argCount := chunk.code[offset + 2]
+    fmt.printf("%-16v (%v args) %4v '", name, argCount, constant)
+    printValue(chunk.constants[constant])
+    fmt.println("'")
+    return offset + 3
+}
+

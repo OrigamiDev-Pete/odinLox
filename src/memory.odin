@@ -63,29 +63,35 @@ blackenObject :: proc(object: ^Obj) {
     }
 
     switch object.type {
+        case .BOUND_METHOD: {
+            bound := cast(^ObjBoundMethod) object
+            markValue(bound.receiver)
+            markObject(bound.method)
+        }
         case .CLASS: {
-            klass := cast(^ObjClass)object
+            klass := cast(^ObjClass) object
             markObject(klass.name)
+            markTable(&klass.methods)
         }
         case .CLOSURE: {
-            closure := cast(^ObjClosure)object
+            closure := cast(^ObjClosure) object
             markObject(closure.function)
             for upvalue in closure.upvalues {
                 markObject(upvalue)
             }
         }
         case .FUNCTION: {
-            function := cast(^ObjFunction)object
+            function := cast(^ObjFunction) object
             markObject(function.name)
             markArray(&function.chunk.constants)
         }
         case .INSTANCE: {
-            instance := cast(^ObjInstance)object
+            instance := cast(^ObjInstance) object
             markObject(instance.klass)
             markTable(&instance.fields)
         }
         case .UPVALUE:
-            markValue((cast(^ObjUpvalue)object).closed)
+            markValue((cast(^ObjUpvalue) object).closed)
         case .NATIVE:
             fallthrough
         case .STRING:

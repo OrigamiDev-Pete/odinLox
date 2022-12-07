@@ -21,6 +21,7 @@ VM :: struct {
     stack: [STACK_MAX]Value,
     stackIndex: i32,
     strings: Table,
+    initString: ^ObjString,
     globals: Table,
     openUpvalues: ^ObjUpvalue,
 
@@ -47,12 +48,15 @@ initVM :: proc() {
     resetStack()
     vm.nextGC = 1024 * 1024
 
+    vm.initString = copyString("init")
+
     defineNative("clock", clockNative)
 }
 
 freeVM :: proc() {
     freeTable(&vm.strings)
     freeTable(&vm.globals)
+    vm.initString = nil
     freeObjects()
 }
 
@@ -150,8 +154,9 @@ run :: proc() -> InterpretResult {
                     break
                 }
 
-                runtimeError("Undefined property '%v'.", name.str)
-                return .RUNTIME_ERROR
+                if !bindMethod(instance.klass, name) {
+                    return .RUNTIME_ERROR
+                }
             }
 
             case .SET_PROPERTY: {
@@ -256,6 +261,15 @@ run :: proc() -> InterpretResult {
                 }
                 frame = &vm.frames[vm.frameCount - 1]
 
+            case .INVOKE: {
+                method := readString()
+                argCount := readByte()
+                if !invoke(method, argCount) {
+                    return .RUNTIME_ERROR
+                }
+                frame = &vm.frames[vm.frameCount - 1]
+            }
+
             case .CLOSURE:
                 function := cast(^ObjFunction) readConstant().variant.(^Obj)
                 closure := newClosure(function)
@@ -291,6 +305,9 @@ run :: proc() -> InterpretResult {
 
             case .CLASS:
                 push(Value{.OBJ, cast(^Obj)newClass(readString())})
+            
+            case .METHOD:
+                defineMethod(readString())
         }
     }
 }
@@ -342,9 +359,21 @@ vmCall :: proc(closure: ^ObjClosure, argCount: u8) -> bool {
 callValue :: proc(callee: Value, argCount: u8) -> bool {
     if callee.type == .OBJ {
         #partial switch callee.variant.(^Obj).type {
+            case .BOUND_METHOD: {
+                bound := cast(^ObjBoundMethod) callee.variant.(^Obj)
+                vm.stack[vm.stackIndex - i32(argCount) - 1] = bound.receiver
+                return vmCall(bound.method, argCount)
+            }
             case .CLASS: {
                 klass := cast(^ObjClass)callee.variant.(^Obj)
                 vm.stack[vm.stackIndex - i32(argCount) - 1] = Value{.OBJ, cast(^Obj)newInstance(klass)}
+                if initializer, ok := tableGet(&klass.methods, vm.initString); ok {
+                    return vmCall(cast(^ObjClosure) initializer.variant.(^Obj), argCount)
+                } else if argCount != 0 {
+                    runtimeError("Expected 0 arguments but got %v.", argCount)
+                    return false
+                }
+
                 return true
             }
             case .CLOSURE:
@@ -360,6 +389,49 @@ callValue :: proc(callee: Value, argCount: u8) -> bool {
     }
     runtimeError("Can only call functions and classes.")
     return false
+}
+
+invokeFromClass :: proc(klass: ^ObjClass, name: ^ObjString, argCount: u8) -> bool {
+    method: Value
+    ok: bool
+    if method, ok = tableGet(&klass.methods, name); !ok {
+        runtimeError("Undefined property '%v'.", name.str)
+        return false
+    }
+    return vmCall(cast(^ObjClosure) method.variant.(^Obj), u8(argCount))
+}
+
+invoke :: proc(name: ^ObjString, argCount: u8) -> bool {
+    receiver := peek(i32(argCount))
+
+    if (cast(^Obj) receiver.variant.(^Obj)).type != .INSTANCE {
+        runtimeError("Only instances have methods.")
+        return false
+    }
+
+    instance := cast(^ObjInstance) receiver.variant.(^Obj)
+
+    if value, ok := tableGet(&instance.fields, name); ok {
+        vm.stack[vm.stackIndex - i32(argCount) - 1] = value
+        return callValue(value, argCount)
+    }
+
+    return invokeFromClass(instance.klass, name, argCount)
+}
+
+bindMethod :: proc(klass: ^ObjClass, name: ^ObjString) -> bool {
+    method: Value
+    ok: bool
+    if method, ok = tableGet(&klass.methods, name); !ok {
+        runtimeError("Undefined property '%s'.", name.str)
+        return false
+    }
+
+    bound := newBoundMethod(peek(0), cast(^ObjClosure) method.variant.(^Obj))
+
+    pop()
+    push(Value{.OBJ, cast(^Obj) bound})
+    return true
 }
 
 captureUpvalue :: proc(local: ^Value) -> ^ObjUpvalue {
@@ -393,6 +465,13 @@ closeUpvalues :: proc(last: ^Value) {
         upvalue.location = &upvalue.closed
         vm.openUpvalues = upvalue.nextUpvalue
     }
+}
+
+defineMethod :: proc(name: ^ObjString) {
+    method := peek(0)
+    klass := cast(^ObjClass)peek(1).variant.(^Obj)
+    tableSet(&klass.methods, name, method)
+    pop()
 }
 
 isFalsey :: proc(value: Value) -> bool {
