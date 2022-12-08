@@ -32,11 +32,18 @@ class CoffeeMaker {
     }
 
     brew() {
-        print "Enjoy you cup of " + this.coffee;
+        print "Enjoy your cup of " + this.coffee;
         this.coffee = nil;
     }
 }
 
-var maker = CoffeeMaker("coffee and chicory");
+class LatteMaker < CoffeeMaker {
+    brew() {
+        super.brew();
+        this.coffee = nil;
+    }
+}
+
+var maker = LatteMaker("coffee and chicory");
 maker.brew();
 

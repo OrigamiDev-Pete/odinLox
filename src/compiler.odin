@@ -5,7 +5,7 @@ import "core:log"
 import "core:strconv"
 import "core:strings"
 
-DEBUG_PRINT_CODE :: false
+DEBUG_PRINT_CODE :: true
 
 Parser :: struct {
 	current: Token,
@@ -69,6 +69,7 @@ Compiler :: struct {
 
 ClassCompiler :: struct {
     enclosing: ^ClassCompiler,
+    hasSuperclass: bool,
 }
 
 parser: Parser
@@ -298,7 +299,7 @@ call :: proc(canAssign: bool) {
 
 dot :: proc(canAssign: bool) {
     consume(.IDENTIFIER, "Expect property name after '.'.")
-    name := identifierConstant(&parser.previous)
+    name := identifierConstant(parser.previous)
 
     if canAssign && match(.EQUAL) {
         expression()
@@ -365,7 +366,7 @@ function :: proc(type: FunctionType) {
 
 method :: proc() {
     consume(.IDENTIFIER, "Expect method name.")
-    constant := identifierConstant(&parser.previous)
+    constant := identifierConstant(parser.previous)
 
     type := FunctionType.METHOD
     if len(parser.previous.value) == 4 && strings.compare(parser.previous.value, "init") == 0 {
@@ -378,22 +379,43 @@ method :: proc() {
 classDeclaration :: proc() {
     consume(.IDENTIFIER, "Expect class name.")
     className := parser.previous
-    nameConstant := identifierConstant(&parser.previous)
+    nameConstant := identifierConstant(parser.previous)
     declareVariable()
 
     emitBytes(OpCode.CLASS, nameConstant)
     defineVariable(nameConstant)
 
-    classCompiler := ClassCompiler{currentClass}
+    classCompiler := ClassCompiler{currentClass, false}
     currentClass = &classCompiler
 
-    namedVariable(&className, false)
+    if match(.LESS) {
+        consume(.IDENTIFIER, "Expect superclass name.")
+        variable(false)
+
+        if identifiersEqual(className, parser.previous) {
+            error("A class can't inherit from itself.")
+        }
+
+        beginScope()
+        addLocal(syntheticToken("super"))
+        defineVariable(0)
+
+        namedVariable(className, false)
+        emitByte(OpCode.INHERIT)
+        classCompiler.hasSuperclass = true
+    }
+
+    namedVariable(className, false)
     consume(.LEFT_BRACE, "Expect '{' before class body.")
     for !check(.RIGHT_BRACE) && !check(.EOF) {
         method()
     }
     consume(.RIGHT_BRACE, "Expect '}' after class body.")
     emitByte(OpCode.POP)
+
+    if classCompiler.hasSuperclass {
+        endScope()
+    }
 
     currentClass = currentClass.enclosing
 }
@@ -601,7 +623,7 @@ lstring :: proc(canAssign: bool) {
     emitConstant(Value{ .OBJ, cast(^Obj) copyString(str) })
 }
 
-namedVariable :: proc(name: ^Token, canAssign: bool) {
+namedVariable :: proc(name: Token, canAssign: bool) {
     getOp, setOp: OpCode
     arg := resolveLocal(current, name)
     if arg != -1 {
@@ -626,7 +648,35 @@ namedVariable :: proc(name: ^Token, canAssign: bool) {
 }
 
 variable :: proc(canAssign: bool) {
-    namedVariable(&parser.previous, canAssign)
+    namedVariable(parser.previous, canAssign)
+}
+
+syntheticToken :: proc(text: string) -> (token: Token) {
+    token.value = text;
+    return
+}
+
+super :: proc(canAssign: bool) {
+    if currentClass == nil {
+        error("Can't use 'super' outside of a class.")
+    } else if !currentClass.hasSuperclass {
+        error("Can't use 'super' in a class with no superclass.")
+    }
+
+    consume(.DOT, "Expect '.' after 'super'.")
+    consume(.IDENTIFIER, "Expect superclass method name.")
+    name := identifierConstant(parser.previous)
+
+    namedVariable(syntheticToken("this"), false)
+    if match(.LEFT_PAREN) {
+        argCount := argumentList()
+        namedVariable(syntheticToken("super"), false)
+        emitBytes(OpCode.SUPER_INVOKE, name)
+        emitByte(argCount)
+    } else {
+        namedVariable(syntheticToken("super"), false)
+        emitBytes(OpCode.GET_SUPER, name)
+    }
 }
 
 this :: proc(canAssign: bool) {
@@ -684,8 +734,8 @@ rules: []ParseRule = {
     TokenType.OR            = ParseRule{ nil,      or_,    .OR   },
     TokenType.PRINT         = ParseRule{ nil,      nil,    .NONE },
     TokenType.RETURN        = ParseRule{ nil,      nil,    .NONE },
-    TokenType.SUPER         = ParseRule{ nil,      nil,    .NONE },
-    TokenType.THIS          = ParseRule{ this,    nil,    .NONE },
+    TokenType.SUPER         = ParseRule{ super,    nil,    .NONE },
+    TokenType.THIS          = ParseRule{ this,     nil,    .NONE },
     TokenType.TRUE          = ParseRule{ literal,  nil,    .NONE },
     TokenType.VAR           = ParseRule{ nil,      nil,    .NONE },
     TokenType.WHILE         = ParseRule{ nil,      nil,    .NONE },
@@ -715,19 +765,19 @@ parsePrecedence :: proc(precedence: Precedence) {
     }
 }
 
-identifierConstant :: proc(name: ^Token) -> u8 {
+identifierConstant :: proc(name: Token) -> u8 {
     return makeConstant(Value{.OBJ, cast(^Obj) copyString(name.value)})
 }
 
-identifiersEqual :: proc(a, b: ^Token) -> bool {
+identifiersEqual :: proc(a, b: Token) -> bool {
     if len(a.value) != len(b.value) { return false }
     return strings.compare(a.value, b.value) == 0
 }
 
-resolveLocal :: proc(compiler: ^Compiler, name: ^Token) -> int {
+resolveLocal :: proc(compiler: ^Compiler, name: Token) -> int {
     for i := compiler.localCount-1; i >= 0; i -= 1 {
         local := &compiler.locals[i]
-        if identifiersEqual(name, &local.name) {
+        if identifiersEqual(name, local.name) {
             if local.depth == -1 {
                 error("Can't read local variable in its own initializer.")
             }
@@ -758,7 +808,7 @@ addUpvalue :: proc(compiler: ^Compiler, index: u8, isLocal: bool) -> int {
     return upvalueCount^
 }
 
-resolveUpvalue :: proc(compiler: ^Compiler, name: ^Token) -> int {
+resolveUpvalue :: proc(compiler: ^Compiler, name: Token) -> int {
     if compiler.enclosing == nil { return -1 }
 
     local := resolveLocal(compiler.enclosing, name)
@@ -797,7 +847,7 @@ declareVariable :: proc() {
             break
         }
 
-        if identifiersEqual(name, &local.name) {
+        if identifiersEqual(name^, local.name) {
             error("Already a variable with this name in this scope.")
         }
     }
@@ -809,7 +859,7 @@ parseVariable :: proc(errorMessage: string) -> u8 {
 
     declareVariable()
     if current.scopeDepth > 0 { return 0 }
-    return identifierConstant(&parser.previous)
+    return identifierConstant(parser.previous)
 }
 
 markInitialized :: proc() {

@@ -17,6 +17,7 @@ OpCode :: enum u8 {
     SET_UPVALUE,
     GET_PROPERTY,
     SET_PROPERTY,
+    GET_SUPER,
     EQUAL,
     GREATER,
     LESS,
@@ -32,11 +33,13 @@ OpCode :: enum u8 {
     LOOP,
     CALL,
     INVOKE,
+    SUPER_INVOKE,
     CLOSURE,
     CLOSE_UPVALUE,
     RETURN,
     METHOD,
     CLASS,
+    INHERIT,
 }
 
 Chunk :: struct {

@@ -171,6 +171,15 @@ run :: proc() -> InterpretResult {
                 push(value)
             }
 
+            case .GET_SUPER: {
+                name := readString()
+                superclass := cast(^ObjClass) pop().variant.(^Obj)
+
+                if !bindMethod(superclass, name) {
+                    return .RUNTIME_ERROR
+                }
+            }
+
             case .EQUAL:
                 b := pop()
                 a := pop()
@@ -270,6 +279,16 @@ run :: proc() -> InterpretResult {
                 frame = &vm.frames[vm.frameCount - 1]
             }
 
+            case .SUPER_INVOKE: {
+                method := readString()
+                argCount := readByte()
+                superclass := cast(^ObjClass) pop().variant.(^Obj)
+                if !invokeFromClass(superclass, method, argCount) {
+                    return .RUNTIME_ERROR
+                }
+                frame = &vm.frames[vm.frameCount - 1]
+            }
+
             case .CLOSURE:
                 function := cast(^ObjFunction) readConstant().variant.(^Obj)
                 closure := newClosure(function)
@@ -308,6 +327,18 @@ run :: proc() -> InterpretResult {
             
             case .METHOD:
                 defineMethod(readString())
+            
+            case .INHERIT: {
+                superclass := peek(1)
+                if superclass.variant.(^Obj).type != .CLASS {
+                    runtimeError("Superclass must be a class.")
+                    return .RUNTIME_ERROR
+                }
+
+                subclass := cast(^ObjClass) peek(0).variant.(^Obj)
+                tableAddAll(&(cast(^ObjClass) superclass.variant.(^Obj)).methods, &subclass.methods)
+                pop()
+            }
         }
     }
 }
