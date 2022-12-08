@@ -41,7 +41,7 @@ InterpretResult :: enum {
 vm: VM
 
 clockNative :: proc(argCount: u8, args: []Value) -> Value {
-    return Value{.NUMBER, cast(f64) time.now()._nsec}
+    return NUMBER_VAL(f64(time.now()._nsec))
 }
 
 initVM :: proc() {
@@ -64,10 +64,10 @@ interpret :: proc(source: string) -> InterpretResult {
     function := compile(source)
     if (function == nil) { return .COMPILE_ERROR }
 
-    push(Value{.OBJ, cast(^Obj)function})
+    push(OBJ_VAL(function))
     closure := newClosure(function)
     pop()
-    push(Value{.OBJ, cast(^Obj) closure})
+    push(OBJ_VAL(closure))
     vmCall(closure, 0)
 
 	return run()
@@ -94,9 +94,9 @@ run :: proc() -> InterpretResult {
                 constant := readConstant()
                 push(constant)
 
-            case .NIL: push(Value{.NIL, nil})
-            case .TRUE: push(Value{.BOOL, true})
-            case .FALSE: push(Value{.BOOL, false})
+            case .NIL: push(NIL_VAL())
+            case .TRUE: push(BOOL_VAL(true))
+            case .FALSE: push(BOOL_VAL(false))
             case .POP: pop()
 
             case .GET_LOCAL:
@@ -139,12 +139,12 @@ run :: proc() -> InterpretResult {
                 frame.closure.upvalues[slot-1].location^ = peek(0)
 
             case .GET_PROPERTY: {
-                if peek(0).variant.(^Obj).type != .INSTANCE {
+                if AS_OBJ(peek(0)).type != .INSTANCE {
                     runtimeError("Only instances have properties.")
                     return .RUNTIME_ERROR
                 }
 
-                instance := cast(^ObjInstance)peek(0).variant.(^Obj)
+                instance := cast(^ObjInstance) AS_OBJ(peek(0))
                 name := readString()
 
                 value: Value
@@ -160,12 +160,12 @@ run :: proc() -> InterpretResult {
             }
 
             case .SET_PROPERTY: {
-                if peek(1).variant.(^Obj).type != .INSTANCE {
+                if AS_OBJ(peek(1)).type != .INSTANCE {
                     runtimeError("Only instances have properties.")
                     return .RUNTIME_ERROR
                 }
 
-                instance := cast(^ObjInstance)peek(1).variant.(^Obj)
+                instance := cast(^ObjInstance) AS_OBJ(peek(1))
                 tableSet(&instance.fields, readString(), peek(0))
                 value := pop()
                 pop()
@@ -174,7 +174,7 @@ run :: proc() -> InterpretResult {
 
             case .GET_SUPER: {
                 name := readString()
-                superclass := cast(^ObjClass) pop().variant.(^Obj)
+                superclass := cast(^ObjClass) AS_OBJ(pop())
 
                 if !bindMethod(superclass, name) {
                     return .RUNTIME_ERROR
@@ -184,32 +184,29 @@ run :: proc() -> InterpretResult {
             case .EQUAL:
                 b := pop()
                 a := pop()
-                push(Value{ .BOOL, valuesEqual(a, b) })
+                push(BOOL_VAL(valuesEqual(a, b)))
 
             case .GREATER:
                 checkNumbers() or_return
                 b := pop()
                 a := pop()
-                push(Value{ .BOOL, a.variant.(f64) > b.variant.(f64) })
+                push(BOOL_VAL(AS_NUMBER(a) > AS_NUMBER(b)))
 
             case .LESS:
                 checkNumbers() or_return
                 b := pop()
                 a := pop()
-                push(Value{ .BOOL, a.variant.(f64) < b.variant.(f64) })
+                push(BOOL_VAL(AS_NUMBER(a) < AS_NUMBER(b)))
 
             case .ADD:
-                v1, ok1 := peek(0).variant.(^Obj)
-                v2, ok2 := peek(1).variant.(^Obj)
-                if ok1 && ok2 {
-                    if v1.type == .STRING && v2.type == .STRING {
-                        concatenate()
-                    }
-                } else if peek(0).type == .NUMBER && peek(0).type == .NUMBER {
-                    b := pop()
-                    a := pop()
-                    a.variant = a.variant.(f64) + b.variant.(f64)
-                    push(a)
+                v1 := peek(0)
+                v2 := peek(1)
+                if IS_OBJ(v1) && AS_OBJ(v1).type == .STRING && IS_OBJ(v2) && AS_OBJ(v2).type == .STRING {
+                    concatenate()
+                } else if IS_NUMBER(peek(0)) && IS_NUMBER(peek(1)) {
+                    b := AS_NUMBER(pop())
+                    a := AS_NUMBER(pop())
+                    push(NUMBER_VAL(a + b))
                 } else {
                     runtimeError("Operands must be two numbers or two strings.")
                     return .RUNTIME_ERROR
@@ -217,34 +214,32 @@ run :: proc() -> InterpretResult {
 
             case .SUBTRACT:
                 checkNumbers() or_return
-                b := pop()
-                a := pop()
-                a.variant = a.variant.(f64) - b.variant.(f64)
-                push(a)
+                b := AS_NUMBER(pop())
+                a := AS_NUMBER(pop())
+                push(NUMBER_VAL(a - b))
 
             case .MULTIPLY:
                 checkNumbers() or_return
-                b := pop()
-                a := pop()
-                a.variant = a.variant.(f64) * b.variant.(f64)
-                push(a)
+                b := AS_NUMBER(pop())
+                a := AS_NUMBER(pop())
+                push(NUMBER_VAL(a * b))
 
             case .DIVIDE:
                 checkNumbers() or_return
-                b := pop()
-                a := pop()
-                a.variant = a.variant.(f64) / b.variant.(f64)
-                push(a)
+                b := AS_NUMBER(pop())
+                a := AS_NUMBER(pop())
+                push(NUMBER_VAL(a / b))
 
             case .NOT:
-                push(Value{.BOOL, isFalsey(pop())})
+                push(BOOL_VAL(isFalsey(pop())))
 
             case .NEGATE:
-                if peek(0).type != .NUMBER {
+                if !IS_NUMBER(peek(0)) {
                     runtimeError("Operand must be a number.")
                     return .RUNTIME_ERROR
                 }
-                vm.stack[vm.stackIndex-1].variant = -vm.stack[vm.stackIndex-1].variant.(f64)
+                // vm.stack[vm.stackIndex-1].variant = -vm.stack[vm.stackIndex-1].variant.(f64)
+                push(NUMBER_VAL(-AS_NUMBER(pop())))
 
             case .PRINT:
                 printValue(pop())
@@ -283,7 +278,7 @@ run :: proc() -> InterpretResult {
             case .SUPER_INVOKE: {
                 method := readString()
                 argCount := readByte()
-                superclass := cast(^ObjClass) pop().variant.(^Obj)
+                superclass := cast(^ObjClass) AS_OBJ(pop())
                 if !invokeFromClass(superclass, method, argCount) {
                     return .RUNTIME_ERROR
                 }
@@ -291,9 +286,9 @@ run :: proc() -> InterpretResult {
             }
 
             case .CLOSURE:
-                function := cast(^ObjFunction) readConstant().variant.(^Obj)
+                function := cast(^ObjFunction) AS_OBJ(readConstant())
                 closure := newClosure(function)
-                push(Value{.OBJ, cast(^Obj) closure})
+                push(OBJ_VAL(closure))
                 for i in 0..<closure.upvalueCount {
                     isLocal := bool(readByte())
                     index := readByte()
@@ -324,20 +319,20 @@ run :: proc() -> InterpretResult {
                 frame = &vm.frames[vm.frameCount - 1]
 
             case .CLASS:
-                push(Value{.OBJ, cast(^Obj)newClass(readString())})
+                push(OBJ_VAL(newClass(readString())))
             
             case .METHOD:
                 defineMethod(readString())
             
             case .INHERIT: {
                 superclass := peek(1)
-                if superclass.variant.(^Obj).type != .CLASS {
+                if AS_OBJ(superclass).type != .CLASS {
                     runtimeError("Superclass must be a class.")
                     return .RUNTIME_ERROR
                 }
 
-                subclass := cast(^ObjClass) peek(0).variant.(^Obj)
-                tableAddAll(&(cast(^ObjClass) superclass.variant.(^Obj)).methods, &subclass.methods)
+                subclass := cast(^ObjClass) AS_OBJ(peek(0))
+                tableAddAll(&(cast(^ObjClass) AS_OBJ(superclass)).methods, &subclass.methods)
                 pop()
             }
         }
@@ -345,7 +340,7 @@ run :: proc() -> InterpretResult {
 }
 
 checkNumbers :: proc() -> InterpretResult {
-    if peek(0).type != .NUMBER || peek(1).type != .NUMBER {
+    if !IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1)) {
         runtimeError("Operands must be numbers.")
         return .RUNTIME_ERROR
     }
@@ -389,18 +384,19 @@ vmCall :: proc(closure: ^ObjClosure, argCount: u8) -> bool {
 }
 
 callValue :: proc(callee: Value, argCount: u8) -> bool {
-    if callee.type == .OBJ {
-        #partial switch callee.variant.(^Obj).type {
+    if IS_OBJ(callee) {
+        calleeObject := AS_OBJ(callee)
+        #partial switch calleeObject.type {
             case .BOUND_METHOD: {
-                bound := cast(^ObjBoundMethod) callee.variant.(^Obj)
+                bound := cast(^ObjBoundMethod) calleeObject
                 vm.stack[vm.stackIndex - i32(argCount) - 1] = bound.receiver
                 return vmCall(bound.method, argCount)
             }
             case .CLASS: {
-                klass := cast(^ObjClass)callee.variant.(^Obj)
-                vm.stack[vm.stackIndex - i32(argCount) - 1] = Value{.OBJ, cast(^Obj)newInstance(klass)}
+                klass := cast(^ObjClass) calleeObject
+                vm.stack[vm.stackIndex - i32(argCount) - 1] = OBJ_VAL(newInstance(klass))
                 if initializer, ok := tableGet(&klass.methods, vm.initString); ok {
-                    return vmCall(cast(^ObjClosure) initializer.variant.(^Obj), argCount)
+                    return vmCall(cast(^ObjClosure) AS_OBJ(initializer), argCount)
                 } else if argCount != 0 {
                     runtimeError("Expected 0 arguments but got %v.", argCount)
                     return false
@@ -409,9 +405,9 @@ callValue :: proc(callee: Value, argCount: u8) -> bool {
                 return true
             }
             case .CLOSURE:
-                return vmCall(cast(^ObjClosure)callee.variant.(^Obj), argCount)
+                return vmCall(cast(^ObjClosure) calleeObject, argCount)
             case .NATIVE:
-                native_object := cast(^ObjNative)callee.variant.(^Obj)
+                native_object := cast(^ObjNative) calleeObject
                 native := native_object.function
                 result := native(argCount, vm.stack[vm.stackIndex - i32(argCount):])
                 vm.stackIndex -= i32(argCount) + 1
@@ -430,18 +426,18 @@ invokeFromClass :: proc(klass: ^ObjClass, name: ^ObjString, argCount: u8) -> boo
         runtimeError("Undefined property '%v'.", name.str)
         return false
     }
-    return vmCall(cast(^ObjClosure) method.variant.(^Obj), u8(argCount))
+    return vmCall(cast(^ObjClosure) AS_OBJ(method), u8(argCount))
 }
 
 invoke :: proc(name: ^ObjString, argCount: u8) -> bool {
     receiver := peek(i32(argCount))
 
-    if (cast(^Obj) receiver.variant.(^Obj)).type != .INSTANCE {
+    if AS_OBJ(receiver).type != .INSTANCE {
         runtimeError("Only instances have methods.")
         return false
     }
 
-    instance := cast(^ObjInstance) receiver.variant.(^Obj)
+    instance := cast(^ObjInstance) AS_OBJ(receiver)
 
     if value, ok := tableGet(&instance.fields, name); ok {
         vm.stack[vm.stackIndex - i32(argCount) - 1] = value
@@ -459,10 +455,10 @@ bindMethod :: proc(klass: ^ObjClass, name: ^ObjString) -> bool {
         return false
     }
 
-    bound := newBoundMethod(peek(0), cast(^ObjClosure) method.variant.(^Obj))
+    bound := newBoundMethod(peek(0), cast(^ObjClosure) AS_OBJ(method))
 
     pop()
-    push(Value{.OBJ, cast(^Obj) bound})
+    push(OBJ_VAL(bound))
     return true
 }
 
@@ -501,18 +497,18 @@ closeUpvalues :: proc(last: ^Value) {
 
 defineMethod :: proc(name: ^ObjString) {
     method := peek(0)
-    klass := cast(^ObjClass)peek(1).variant.(^Obj)
+    klass := cast(^ObjClass) AS_OBJ(peek(1))
     tableSet(&klass.methods, name, method)
     pop()
 }
 
 isFalsey :: proc(value: Value) -> bool {
-    return value.type == .NIL || (value.type == .BOOL && !value.variant.(bool))
+    return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value))
 }
 
 concatenate :: proc() {
-    b := cast(^ObjString) peek(0).variant.(^Obj)
-    a := cast(^ObjString) peek(1).variant.(^Obj)
+    b := cast(^ObjString) AS_OBJ(peek(0))
+    a := cast(^ObjString) AS_OBJ(peek(1))
 
     length := len(a.str) + len(b.str)
     chars := make([]byte, length)
@@ -523,7 +519,7 @@ concatenate :: proc() {
     result := takeString(string(chars))
     pop()
     pop()
-    push(Value{.OBJ, cast(^Obj)result})
+    push(OBJ_VAL(result))
 }
 
 readByte :: proc() -> (b: u8) {
@@ -546,7 +542,7 @@ readConstant :: proc() -> Value {
 }
 
 readString :: proc() -> ^ObjString {
-    return cast(^ObjString) readConstant().variant.(^Obj)
+    return cast(^ObjString) AS_OBJ(readConstant())
 }
 
 resetStack :: proc() {
@@ -573,9 +569,9 @@ runtimeError :: proc(format: string, args: ..any) {
 }
 
 defineNative :: proc(name: string, function: NativeFn) {
-    push(Value{.OBJ, cast(^Obj) copyString(name)})
-    push(Value{.OBJ, cast(^Obj) newNative(function)})
-    tableSet(&vm.globals, cast(^ObjString) vm.stack[0].variant.(^Obj), vm.stack[1])
+    push(OBJ_VAL(copyString(name)))
+    push(OBJ_VAL(newNative(function)))
+    tableSet(&vm.globals, cast(^ObjString) AS_OBJ(vm.stack[0]), vm.stack[1])
     pop()
     pop()
 }

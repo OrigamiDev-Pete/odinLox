@@ -34,7 +34,7 @@ markObject :: proc(object: ^Obj) {
 
     when DEBUG_LOG_GC {
         fmt.printf("[DEBUG] --- %p mark ", object)
-        printValue(Value{.OBJ, object})
+        printValue(OBJ_VAL(object))
         fmt.println()
     }
     object.isMarked = true
@@ -44,8 +44,8 @@ markObject :: proc(object: ^Obj) {
 }
 
 markValue :: proc(value: Value) {
-    if value.type == .OBJ {
-        markObject(value.variant.(^Obj))
+    if IS_OBJ(value) {
+        markObject(AS_OBJ(value))
     }
 }
 
@@ -58,7 +58,7 @@ markArray :: proc(array: ^[dynamic]Value) {
 blackenObject :: proc(object: ^Obj) {
     when DEBUG_LOG_GC {
         fmt.printf("[DEBUG] --- %p blacken ", object)
-        printValue(Value{.OBJ, object})
+        printValue(OBJ_VAL(object))
         fmt.println()
     }
 

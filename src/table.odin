@@ -28,7 +28,7 @@ tableSet :: proc(table: ^Table, key: ^ObjString, value: Value) -> bool {
 
     entry := findEntry(table.entries, table.capacity, key)
     isNewKey := entry.key == nil
-    if isNewKey && entry.value.type == .NIL { table.count += 1 }
+    if isNewKey && IS_NIL(entry.value) { table.count += 1 }
 
     entry.key = key
     entry.value = value
@@ -42,7 +42,7 @@ tableDelete :: proc(table: ^Table, key: ^ObjString) -> bool {
     if entry.key == nil { return false }
 
     entry.key = nil
-    entry.value = Value{.BOOL, true}
+    entry.value = BOOL_VAL(true)
     return true
 }
 
@@ -63,7 +63,7 @@ tableFindString :: proc(table: ^Table, str: string, hash: u32) -> ^ObjString {
         entry := &table.entries[index]
         if entry.key == nil {
             // Stop if we find an empty non-tombstone entry.
-            if entry.value.type == .NIL { return nil }
+            if IS_NIL(entry.value) { return nil }
         } else if len(entry.key.str) == len(str) && entry.key.hash == hash && strings.compare(entry.key.str, str) == 0 {
             // We found it.
             return entry.key
@@ -95,7 +95,7 @@ findEntry :: proc(entries: []Entry, capacity: int, key: ^ObjString) -> ^Entry {
     for {
         entry := &entries[index]
         if entry.key == nil {
-            if entry.value.type == .NIL {
+            if IS_NIL(entry.value) {
                 // Empty entry.
                 return tombstone if tombstone != nil else entry
             } else {
@@ -124,7 +124,7 @@ adjustCapacity :: proc(table: ^Table, capacity: int) {
     entries := make([]Entry, capacity)
     for i in 0..<capacity {
         entries[i].key = nil
-        entries[i].value = Value{.NIL, nil}
+        entries[i].value = NIL_VAL()
     }
 
     table.count = 0

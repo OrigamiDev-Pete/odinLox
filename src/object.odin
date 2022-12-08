@@ -100,7 +100,7 @@ newNative :: proc(function: NativeFn) -> ^ObjNative {
 }
 
 isObjType :: proc(value: Value, type: ObjType) -> bool {
-    return value.type == .OBJ && value.variant.(^Obj).type == type
+    return IS_OBJ(value) && AS_OBJ(value).type == type
 }
 
 printObject :: proc(object: ^Obj) {
@@ -129,7 +129,7 @@ copyString :: proc(str: string) -> ^ObjString {
 
 newUpvalue :: proc(slot: ^Value) -> ^ObjUpvalue {
     upvalue := allocateObject(ObjUpvalue, .UPVALUE)
-    upvalue.closed = Value{.NIL, nil}
+    upvalue.closed = NIL_VAL()
     upvalue.location = slot
     return upvalue
 }
@@ -181,8 +181,8 @@ allocateString :: proc(str: string, hash: u32) -> ^ObjString {
     lstring.str = str
     lstring.hash = hash
 
-    push(Value{.OBJ, cast(^Obj)lstring})
-    tableSet(&vm.strings, lstring, Value{.NIL, nil})
+    push(OBJ_VAL(lstring))
+    tableSet(&vm.strings, lstring, NIL_VAL())
     pop()
 
     return lstring

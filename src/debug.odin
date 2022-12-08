@@ -95,7 +95,7 @@ disassembleInstruction :: proc(chunk: Chunk, offset: int) -> int {
         printValue(chunk.constants[constant])
         fmt.println()
 
-        function := cast(^ObjFunction) chunk.constants[constant].variant.(^Obj)
+        function := cast(^ObjFunction) AS_OBJ(chunk.constants[constant])
         for j in 0..<function.upvalueCount {
             isLocal := bool(chunk.code[offset])
             offset += 1

@@ -356,7 +356,7 @@ function :: proc(type: FunctionType) {
     block()
 
     function := endCompiler()
-    emitBytes(OpCode.CLOSURE, makeConstant(Value{.OBJ, cast(^Obj) function}))
+    emitBytes(OpCode.CLOSURE, makeConstant(OBJ_VAL(function)))
 
     for i in 0..<function.upvalueCount {
         emitByte_u8(1 if compiler.upvalues[i].isLocal else 0)
@@ -603,7 +603,7 @@ grouping :: proc(canAssign: bool) {
 
 number :: proc(canAssign: bool) {
     value := strconv.atof(parser.previous.value)
-    emitConstant(Value{.NUMBER, value})
+    emitConstant(NUMBER_VAL(value))
 }
 
 or_ :: proc(canAssign: bool) {
@@ -620,7 +620,7 @@ or_ :: proc(canAssign: bool) {
 
 lstring :: proc(canAssign: bool) {
     str := parser.previous.value[1:len(parser.previous.value)-1] // remove the "" from the string literal
-    emitConstant(Value{ .OBJ, cast(^Obj) copyString(str) })
+    emitConstant(OBJ_VAL(copyString(str)))
 }
 
 namedVariable :: proc(name: Token, canAssign: bool) {
@@ -766,7 +766,7 @@ parsePrecedence :: proc(precedence: Precedence) {
 }
 
 identifierConstant :: proc(name: Token) -> u8 {
-    return makeConstant(Value{.OBJ, cast(^Obj) copyString(name.value)})
+    return makeConstant(OBJ_VAL(copyString(name.value)))
 }
 
 identifiersEqual :: proc(a, b: Token) -> bool {
