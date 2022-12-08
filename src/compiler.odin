@@ -5,7 +5,7 @@ import "core:log"
 import "core:strconv"
 import "core:strings"
 
-DEBUG_PRINT_CODE :: true
+DEBUG_PRINT_CODE :: false
 
 Parser :: struct {
 	current: Token,

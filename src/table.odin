@@ -58,7 +58,7 @@ tableAddAll :: proc(from, to: ^Table) {
 tableFindString :: proc(table: ^Table, str: string, hash: u32) -> ^ObjString {
     if table.count == 0 { return nil }
 
-    index := hash % u32(table.capacity)
+    index := hash & u32(table.capacity - 1)
     for {
         entry := &table.entries[index]
         if entry.key == nil {
@@ -69,7 +69,7 @@ tableFindString :: proc(table: ^Table, str: string, hash: u32) -> ^ObjString {
             return entry.key
         }
 
-        index = (index + 1) % u32(table.capacity)
+        index = (index + 1) & u32(table.capacity - 1)
     }
 }
 
@@ -90,7 +90,7 @@ markTable :: proc(table: ^Table) {
 }
 
 findEntry :: proc(entries: []Entry, capacity: int, key: ^ObjString) -> ^Entry {
-    index := key.hash % u32(capacity)
+    index := key.hash & u32(capacity - 1)
     tombstone: ^Entry = nil
     for {
         entry := &entries[index]
@@ -107,7 +107,7 @@ findEntry :: proc(entries: []Entry, capacity: int, key: ^ObjString) -> ^Entry {
             return entry
         }
 
-        index = (index + 1) % u32(capacity)
+        index = (index + 1) & u32(capacity - 1)
     }
 }
 

@@ -9,7 +9,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceRoot}/bin/lox.exe",
-            // "args": ["fib.lox"],
+            "args": ["test.lox"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],

@@ -168,6 +168,7 @@ run :: proc() -> InterpretResult {
                 instance := cast(^ObjInstance)peek(1).variant.(^Obj)
                 tableSet(&instance.fields, readString(), peek(0))
                 value := pop()
+                pop()
                 push(value)
             }
 

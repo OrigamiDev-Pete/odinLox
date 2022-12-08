@@ -11,12 +11,12 @@ import "core:time"
 main :: proc() {
 	context.logger = log.create_console_logger()
 
-	tracking_allocator: mem.Tracking_Allocator
-	mem.tracking_allocator_init(&tracking_allocator, context.allocator)
-	context.allocator = mem.tracking_allocator(&tracking_allocator)
+	// tracking_allocator: mem.Tracking_Allocator
+	// mem.tracking_allocator_init(&tracking_allocator, context.allocator)
+	// context.allocator = mem.tracking_allocator(&tracking_allocator)
 
 	initVM()
-	defer(freeVM())
+	// defer(freeVM())
 
 	if (len(os.args) == 1) {
 		repl()
@@ -27,12 +27,12 @@ main :: proc() {
 		os.exit(64)
 	}
 
-	for _, leak in tracking_allocator.allocation_map {
-		log.warnf("%v leaked %v bytes", leak.location, leak.size)
-	}
-	for bad_free in tracking_allocator.bad_free_array {
-		log.warnf("%v allocation %p was freed badly", bad_free.location, bad_free.memory)
-	}
+	// for _, leak in tracking_allocator.allocation_map {
+	// 	log.warnf("%v leaked %v bytes", leak.location, leak.size)
+	// }
+	// for bad_free in tracking_allocator.bad_free_array {
+	// 	log.warnf("%v allocation %p was freed badly", bad_free.location, bad_free.memory)
+	// }
 }
 
 repl :: proc() {
